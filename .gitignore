@@ -1,0 +1,23 @@
+# Prerequisites / Environment
+.venv/
+node_modules/
+.env
+
+# Build Artifacts
+build/
+bin/
+obj/
+*.o
+*.a
+*.dylib
+CTT_Engine
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# IDE & OS
+.vscode/
+.DS_Store
+.cache/

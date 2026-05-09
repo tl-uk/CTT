@@ -1,0 +1,25 @@
+Work on Machine A: Make changes, then:
+
+Bash
+git add .
+git commit -m "Update agent logic"
+git push
+
+Switch to Machine B:
+
+Bash
+git pull
+# If change C++ code:
+cmake --build build
+# If add Python libraries:
+uv pip install -r requirements.txt
+
+------
+Test ZMQ
+
+Terminal 1
+./build/CTT_Engine
+
+Terminal 2
+source .venv/bin/activate
+python test_bridge.py

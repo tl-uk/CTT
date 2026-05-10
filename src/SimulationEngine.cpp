@@ -15,7 +15,9 @@ entt::registry& SimulationEngine::get_registry() {
 void SimulationEngine::initialize_test_fleet() {
     // 1. Create a Road Freight Agent (eHGV)
     auto ehgv = registry.create();
-    registry.emplace<TaxonomyComponent>(ehgv, TransportMode::ROAD_MOTORIZED, 2, false);
+    // Populate components for the eHGV
+    // Explicitly cast int literals to uint8_t to avoid narrowing conversion warnings
+    registry.emplace<TaxonomyComponent>(ehgv, TransportMode::ROAD_MOTORIZED, static_cast<uint8_t>(2), false);
     registry.emplace<PayloadComponent>(ehgv, CargoType::PALLETISED, 15000.0f, 40000.0f, 1, 2);
     registry.emplace<EnergyComponent>(ehgv, PowertrainType::BEV_ELECTRIC, 600.0f, 600.0f, 1.5f);
     registry.emplace<KinematicComponent>(ehgv, 22.0f, 90.0f); // approx 80 km/h
@@ -23,7 +25,7 @@ void SimulationEngine::initialize_test_fleet() {
 
     // 2. Create a Rail Agent (Diesel Train)
     auto train = registry.create();
-    registry.emplace<TaxonomyComponent>(train, TransportMode::RAIL, 1, false);
+    registry.emplace<TaxonomyComponent>(train, TransportMode::RAIL, static_cast<uint8_t>(1), false);
     registry.emplace<PayloadComponent>(train, CargoType::PASSENGER, 0.0f, 0.0f, 120, 400);
     registry.emplace<EnergyComponent>(train, PowertrainType::ICE_DIESEL, 5000.0f, 5000.0f, 3.2f);
     registry.emplace<KinematicComponent>(train, 30.0f, 0.0f);

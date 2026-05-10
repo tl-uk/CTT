@@ -14,7 +14,7 @@ namespace CTT {
     public:
         /**
          * @brief Initializes the ZeroMQ context and binds to the specified port.
-         * @param address The TCP address to bind to (e.g., "tcp://*:5555").
+         * @param address The TCP address to bind to (e.g., "tcp://0.0.0.0:5555").
          */
         DataBridge(const std::string& address);
         ~DataBridge() = default;

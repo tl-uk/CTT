@@ -98,6 +98,16 @@ namespace CTT {
     };
 
     /**
+     * @struct ROI_Component
+     * @brief L3 Cognitive linkage: Economic feedback for the agent's decision-making
+     */
+    struct ROI_Component {
+        double financial_cost;    ///< Total cost of ownership (TCO) in GBP
+        double social_capital;    ///< Social value generated
+        double personal_roi;      ///< Personal return on investment
+    };
+
+    /**
      * @struct CLD_FeedbackComponent
      * @brief Links the individual agent to macro-economic systems and national databases.
      */

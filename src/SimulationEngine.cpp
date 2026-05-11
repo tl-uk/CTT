@@ -5,8 +5,10 @@ namespace CTT {
 
 SimulationEngine::SimulationEngine() {
     // 1. Enable the L1 UI Portal (REST API & Web Explorer)
+    // FIXED: Using 'flecs::rest::Rest' instead of 'Reply'
     world.import<flecs::monitor>();
-    world.set<flecs::rest::Reply>({});
+    world.import<flecs::rest>(); 
+    world.set<flecs::rest::Rest>({}); // Initializes REST server on default port 8080
 
     // 2. Setup systems
     register_systems();
@@ -16,10 +18,19 @@ flecs::world& SimulationEngine::get_world() {
     return world;
 }
 
+void SimulationEngine::update(float delta_time) {
+    // Progress the Flecs world (this triggers all registered systems)
+    world.progress(delta_time);
+}
+
 void SimulationEngine::register_systems() {
-    // System: Energy Consumption (Only runs on MicroActive entities)
+    /**
+     * @system EnergyConsumptionSystem
+     * @brief Calculates energy drain based on speed and payload.
+     * Filter: Only processes entities with the 'MicroActive' tag.
+     */
     world.system<KinematicComponent, EnergyComponent, const PayloadComponent>("EnergyConsumptionSystem")
-        .with<MicroActive>() // Tag filtering
+        .with<MicroActive>()
         .iter([](flecs::iter& it, KinematicComponent* kin, EnergyComponent* energy, const PayloadComponent* payload) {
             for (auto i : it) {
                 float load_multiplier = 1.0f;
@@ -27,54 +38,29 @@ void SimulationEngine::register_systems() {
                     load_multiplier += (payload[i].currentLoadKg / payload[i].maxCapacityKg);
                 }
 
+                // Consumption math
                 float consumption = energy[i].baseEfficiency * (kin[i].speed_mps / 10.0f) * load_multiplier * it.delta_time();
                 energy[i].currentEnergyStorage -= consumption;
 
                 if (energy[i].currentEnergyStorage < 0) {
                     energy[i].currentEnergyStorage = 0;
                 }
-
-                // SSN Detection: If battery > 50%, emit a "One-Shot Success"
-                if (energy[i].currentEnergyStorage > (energy[i].maxEnergyStorage * 0.5f)) {
-                    it.entity(i).add<OneShotSuccess>();
-                }
             }
         });
 
-    // System: SSN Observer (Catches the One-Shot Success)
-    world.observer<OneShotSuccess>("SSN_SuccessDetector")
-        .event(flecs::OnAdd)
-        .each([](flecs::entity e, OneShotSuccess) {
-            std::cout << "[SSN Vault] One-Shot Success Captured for: " << e.name() << std::endl;
-            // Remove the tag so it can be triggered again later
-            e.remove<OneShotSuccess>(); 
-        });
+    std::cout << "[L1 Engine] ECS Systems Registered." << std::endl;
 }
 
 void SimulationEngine::initialize_test_fleet() {
-    // Flecs allows us to name entities, making the UI Explorer much easier to read
-    auto ehgv = world.entity("Volvo_eHGV_001");
-    ehgv.add<MicroActive>(); // Assign LOD Tag
-    ehgv.set<TaxonomyComponent>({TransportMode::ROAD_MOTORIZED, static_cast<uint8_t>(2), false});
-    ehgv.set<PayloadComponent>({CargoType::PALLETISED, 15000.0f, 40000.0f, 1, 2});
-    ehgv.set<EnergyComponent>({PowertrainType::BEV_ELECTRIC, 600.0f, 600.0f, 1.5f});
-    ehgv.set<KinematicComponent>({22.0f, 90.0f}); 
-    ehgv.set<PositionComponent>({55.9533, -3.1883, 50.0f}); 
+    auto ehgv = world.entity("Volvo_eHGV_001")
+        .add<MicroActive>()
+        .set<TaxonomyComponent>({TransportMode::ROAD_MOTORIZED, 2, false})
+        .set<PayloadComponent>({CargoType::PALLETISED, 15000.0f, 40000.0f, 1, 2})
+        .set<EnergyComponent>({PowertrainType::BEV_ELECTRIC, 600.0f, 600.0f, 1.5f})
+        .set<KinematicComponent>({22.0f, 90.0f})
+        .set<PositionComponent>({55.9533, -3.1883, 50.0f});
 
-    auto train = world.entity("Freightliner_Class66");
-    train.add<MicroActive>();
-    train.set<TaxonomyComponent>({TransportMode::RAIL, static_cast<uint8_t>(1), false});
-    train.set<PayloadComponent>({CargoType::PASSENGER, 0.0f, 0.0f, 120, 400});
-    train.set<EnergyComponent>({PowertrainType::ICE_DIESEL, 5000.0f, 5000.0f, 3.2f});
-    train.set<KinematicComponent>({30.0f, 0.0f});
-    train.set<PositionComponent>({55.9520, -3.1900, 60.0f});
-
-    std::cout << "[L1 Engine] Test fleet initialized in Flecs." << std::endl;
-}
-
-void SimulationEngine::update(float delta_time) {
-    // world.progress() automatically executes all registered systems and observers
-    world.progress(delta_time);
+    std::cout << "[L1 Engine] Test fleet initialized." << std::endl;
 }
 
 } // namespace CTT

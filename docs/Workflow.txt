@@ -15,6 +15,17 @@ cmake --build build
 uv pip install -r requirements.txt
 
 ------
+# "New Computer" installation Checklist workflow:
+
+1. git clone [your-repo]
+
+2. brew bundle (Installs C++ libs)
+
+3. uv venv && uv pip install -r requirements.txt (Installs Python libs)
+
+4. cmake -B build -S . && cmake --build build (Compiles)
+
+------
 # Run a Clean Build
 rm -rf build
 cmake -B build -S .

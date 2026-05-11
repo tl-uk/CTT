@@ -115,6 +115,10 @@ namespace CTT {
         bool is_decarbonized;     ///< True if currently in a low-carbon state (e.g., BEV or FCEV)
     };
 
+    // Tags for Layer 5 Events
+    struct MindsetShiftEvent {};
+    struct MindsetRegressionEvent {};
+
     /** @struct ROI_Component @brief Economic/Social viability. */
     struct ROI_Component {
         double financial_cost;    ///< TCO in GBP

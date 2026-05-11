@@ -1,5 +1,5 @@
 #pragma once
-#include <entt/entt.hpp>
+#include <flecs.h>
 #include "AgentComponents.hpp"
 
 namespace CTT {
@@ -23,9 +23,9 @@ namespace CTT {
 
         /**
          * @brief Exposes the ECS registry for reading by the Digital Shadow (DataBridge).
-         * @return A reference to the EnTT registry.
+         * @return A reference to the Flecs world.
          */
-        entt::registry& get_registry();
+        flecs::world& get_world();
 
         /**
          * @brief Populates the simulation with initial test agents (e.g., eHGV, Train).
@@ -33,7 +33,7 @@ namespace CTT {
         void initialize_test_fleet();
 
     private:
-        entt::registry registry;
+        flecs::world world;
 
         /**
          * @brief Calculates energy drain based on speed, load, and powertrain type.

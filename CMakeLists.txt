@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
-project(CTT_Engine LANGUAGES CXX)
+# Flecs requires a C compiler for its core, alongside CXX for its API
+project(CTT_Engine LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,12 +10,9 @@ include(FetchContent)
 # -----------------------------------------------------------------------------
 # 1. nlohmann_json (Digital Shadow Telemetry)
 # -----------------------------------------------------------------------------
-# We try to find it on the system first. 
-# On macOS, this looks in /opt/homebrew. On Windows, it looks in vcpkg/conan paths.
 find_package(nlohmann_json QUIET)
-
 if(NOT nlohmann_json_FOUND)
-    message(STATUS "nlohmann_json not found locally. Fetching from GitHub for platform-agnostic build...")
+    message(STATUS "Fetching nlohmann_json for platform-agnostic build...")
     FetchContent_Declare(
         json
         URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz
@@ -25,20 +23,21 @@ endif()
 # -----------------------------------------------------------------------------
 # 2. ZeroMQ / cppzmq (Messaging Layer)
 # -----------------------------------------------------------------------------
-# ZeroMQ usually requires a system-level install (libzmq).
 find_package(cppzmq REQUIRED)
 
 # -----------------------------------------------------------------------------
-# 3. EnTT (Agent ECS Registry)
+# 3. Flecs (Multi-scale ECS & Digital Twin Explorer)
 # -----------------------------------------------------------------------------
-# Since EnTT is header-only and small, we always fetch it to ensure 
-# version consistency across your M3 Max and M3 Laptop.
+# Enable the built-in REST API and Web Dashboard for real-time twin observability
+set(FLECS_REST ON CACHE BOOL "Enable Flecs REST API" FORCE)
+set(FLECS_EXPLORER ON CACHE BOOL "Enable Flecs Web Explorer" FORCE)
+
 FetchContent_Declare(
-    entt
-    GIT_REPOSITORY https://github.com/skypjack/entt.git
-    GIT_TAG v3.13.0
+    flecs
+    GIT_REPOSITORY https://github.com/SanderMertens/flecs.git
+    GIT_TAG v3.2.11  # Latest stable release
 )
-FetchContent_MakeAvailable(entt)
+FetchContent_MakeAvailable(flecs)
 
 # -----------------------------------------------------------------------------
 # 4. Target Definition
@@ -51,17 +50,16 @@ add_executable(CTT_Engine
 
 target_include_directories(CTT_Engine PRIVATE include)
 
-# Link using namespaced targets (Universal across OS)
+# Link Libraries (Replace EnTT with flecs)
 target_link_libraries(CTT_Engine PRIVATE 
     cppzmq 
     nlohmann_json::nlohmann_json 
-    EnTT::EnTT
+    flecs
 )
 
 # -----------------------------------------------------------------------------
 # 5. Platform-Specific Tweaks
 # -----------------------------------------------------------------------------
 if(MSVC)
-    # Windows-specific: Disable min/max macros that interfere with C++ std
     target_compile_definitions(CTT_Engine PRIVATE NOMINMAX)
 endif()

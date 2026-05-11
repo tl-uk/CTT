@@ -1,25 +1,37 @@
 #include <iostream>
-#include <zmq.hpp>
 #include <chrono>
 #include <thread>
+#include "SimulationEngine.hpp"
+#include "DataBridge.hpp"
+
 
 int main() {
-    zmq::context_t context(1);
-    zmq::socket_t socket(context, zmq::socket_type::pub); // Using PUB for "Broadcast"
-    socket.bind("tcp://*:5555");
-
-    std::cout << "CTT Master Engine Online [L1 Reflexive Layer]" << std::endl;
+    std::cout << "--- CTT Master Engine Online ---" << std::endl;
     
-    int tick = 0;
-    while (true) { // This keeps the engine ALIVE
-        std::string message = "Pulse from M3 at tick " + std::to_string(tick);
-        socket.send(zmq::buffer(message), zmq::send_flags::none);
-        
-        std::cout << "Pulse sent at tick " << tick << std::endl;
-        tick++;
+    CTT::SimulationEngine engine;
+    CTT::DataBridge bridge("tcp://*:5555");
 
-        // Sleep for 1 second so we don't spam the CPU
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+    engine.initialize_test_fleet();
+
+    std::cout << "[L1 UI] Open your browser to: http://localhost:27750/explorer to view the Digital Twin" << std::endl;
+
+    // The Master Clock Loop
+    auto last_time = std::chrono::high_resolution_clock::now();
+
+    while (true) {
+        auto current_time = std::chrono::high_resolution_clock::now();
+        float delta_time = std::chrono::duration<float>(current_time - last_time).count();
+        last_time = current_time;
+
+        // 1. Tick the Flecs Reflexive Engine
+        engine.update(delta_time);
+
+        // 2. Broadcast the Digital Shadow to Python
+        bridge.broadcast_state(engine.get_world());
+
+        // Sleep to maintain ~10Hz (100ms) tick rate
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+
     return 0;
 }

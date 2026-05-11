@@ -1,6 +1,6 @@
 #pragma once
 #include <zmq.hpp>
-#include <entt/entt.hpp>
+#include <flecs.h>
 #include <string>
 
 namespace CTT {
@@ -23,7 +23,7 @@ namespace CTT {
          * @brief Serializes agent states and sends the payload to the Python layer.
          * @param registry Reference to the core SimulationEngine ECS registry.
          */
-        void broadcast_state(entt::registry& registry);
+        void broadcast_state(flecs::world& world);
 
     private:
         zmq::context_t context;

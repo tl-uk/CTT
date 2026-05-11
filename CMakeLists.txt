@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
-# Flecs requires a C compiler for its core, alongside CXX for its API
+
+# project() must enable C for the Flecs core, alongside CXX for its API
 project(CTT_Engine LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -8,11 +9,25 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(FetchContent)
 
 # -----------------------------------------------------------------------------
-# 1. nlohmann_json (Digital Shadow Telemetry)
+# 1. Flecs Global Configuration (Must be set BEFORE FetchContent_MakeAvailable)
 # -----------------------------------------------------------------------------
+# These variables ensure the modules needed for the Digital Twin are compiled.
+set(FLECS_REST ON CACHE BOOL "Enable Flecs REST API" FORCE)
+set(FLECS_MONITOR ON CACHE BOOL "Enable Flecs Monitor Module" FORCE)
+set(FLECS_SYSTEM ON CACHE BOOL "Enable Flecs System Module" FORCE)
+set(FLECS_CPP ON CACHE BOOL "Enable Flecs C++ API" FORCE)
+
+# -----------------------------------------------------------------------------
+# 2. Dependencies
+# -----------------------------------------------------------------------------
+
+# Threads is required for ZeroMQ and the Flecs REST server background threads
+find_package(Threads REQUIRED)
+
+# nlohmann_json (Digital Shadow Telemetry)
 find_package(nlohmann_json QUIET)
 if(NOT nlohmann_json_FOUND)
-    message(STATUS "Fetching nlohmann_json for platform-agnostic build...")
+    message(STATUS "Fetching nlohmann_json...")
     FetchContent_Declare(
         json
         URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz
@@ -20,27 +35,19 @@ if(NOT nlohmann_json_FOUND)
     FetchContent_MakeAvailable(json)
 endif()
 
-# -----------------------------------------------------------------------------
-# 2. ZeroMQ / cppzmq (Messaging Layer)
-# -----------------------------------------------------------------------------
+# ZeroMQ / cppzmq (Messaging Layer)
 find_package(cppzmq REQUIRED)
 
-# -----------------------------------------------------------------------------
-# 3. Flecs (Multi-scale ECS & Digital Twin Explorer)
-# -----------------------------------------------------------------------------
-# Enable the built-in REST API and Web Dashboard for real-time twin observability
-set(FLECS_REST ON CACHE BOOL "Enable Flecs REST API" FORCE)
-set(FLECS_EXPLORER ON CACHE BOOL "Enable Flecs Web Explorer" FORCE)
-
+# Flecs (Multi-scale ECS & Digital Twin Explorer)
 FetchContent_Declare(
     flecs
     GIT_REPOSITORY https://github.com/SanderMertens/flecs.git
-    GIT_TAG v3.2.11  # Latest stable release
+    GIT_TAG v3.2.11 
 )
 FetchContent_MakeAvailable(flecs)
 
 # -----------------------------------------------------------------------------
-# 4. Target Definition
+# 3. Target Definition
 # -----------------------------------------------------------------------------
 add_executable(CTT_Engine
     src/main.cpp
@@ -48,17 +55,20 @@ add_executable(CTT_Engine
     src/DataBridge.cpp
 )
 
+# Ensures headers in include/ (like SimulationEngine.hpp) are found
 target_include_directories(CTT_Engine PRIVATE include)
 
-# Link Libraries (Replace EnTT with flecs)
+# Link Libraries
+# Note: Linking Threads::Threads is critical for background simulation tasks
 target_link_libraries(CTT_Engine PRIVATE 
-    cppzmq 
-    nlohmann_json::nlohmann_json 
     flecs
+    nlohmann_json::nlohmann_json 
+    cppzmq
+    Threads::Threads
 )
 
 # -----------------------------------------------------------------------------
-# 5. Platform-Specific Tweaks
+# 4. Platform-Specific Tweaks
 # -----------------------------------------------------------------------------
 if(MSVC)
     target_compile_definitions(CTT_Engine PRIVATE NOMINMAX)

@@ -38,6 +38,12 @@ cmake --build build
 rm -rf build
 cmake -B build -S . -DCMAKE_OSX_ARCHITECTURES="arm64" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build build
+# Check if the final binary was linked successfully:
+ls -l build/CTT_Engine
+# Check arm64
+file build/CTT_Engine
+# Run the executable
+./build/CTT_Engine
 
 # Clean start
 rm -rf .venv

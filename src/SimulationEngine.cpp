@@ -5,12 +5,20 @@ namespace CTT {
 
 SimulationEngine::SimulationEngine() {
     // 1. Enable the L1 UI Portal (REST API & Web Explorer)
-    // FIXED: Using 'flecs::rest::Rest' instead of 'Reply'
-    world.import<flecs::monitor>();
-    world.import<flecs::rest>(); 
-    world.set<flecs::rest::Rest>({}); // Initializes REST server on default port 8080
+    // Using string-based import avoids 'unexpected namespace' errors in Clang/macOS
+    world.import("flecs.monitor");
+    world.import("flecs.rest");
 
-    // 2. Setup systems
+    // 2. Initialize the REST server
+    // Note: If 'Rest' is still not found, ensure FLECS_REST is enabled in your build.
+#ifdef FLECS_REST
+    world.set<flecs::rest::Rest>({}); 
+    std::cout << "[L1 Engine] REST API enabled on port 8080" << std::endl;
+#else
+    std::cerr << "[L1 Engine] Warning: Flecs built without REST support!" << std::endl;
+#endif
+
+    // 3. Setup systems
     register_systems();
 }
 

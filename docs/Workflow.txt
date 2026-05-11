@@ -15,6 +15,20 @@ cmake --build build
 uv pip install -r requirements.txt
 
 ------
+# Run a Clean Build
+rm -rf build
+cmake -B build -S .
+cmake --build build
+
+# Clean start
+rm -rf .venv
+# Use 3.13 (Native arm64 and highly stable)
+uv venv --python 3.13
+source .venv/bin/activate
+# Download pre-built files
+uv pip install bptk-py pyzmq eclipse-sumo
+
+------
 Test ZMQ
 
 Terminal 1

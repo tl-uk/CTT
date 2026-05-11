@@ -4,7 +4,7 @@
 namespace CTT {
 
 SimulationEngine::SimulationEngine() {
-    // FIX: Use the component types as template arguments, not strings.
+    // Use the component types as template arguments, not strings.
     // This resolves the C/C++(304) template match error.
     world.import<flecs::monitor>();
     

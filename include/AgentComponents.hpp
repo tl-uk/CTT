@@ -100,9 +100,19 @@ namespace CTT {
 
     /** @struct MindsetComponent @brief L3 Cognitive BDI linkage. */
     struct MindsetComponent {
+        // 1. The Continuous Dynamic (The Input Signal)
+        double adversarial_pressure; ///< Calculated from Energy + ROI
+
+        // 2. Behavioral Modifiers
         double habit_resistance;  ///< (H) Pull toward legacy behavior
-        double satisfaction;      ///< (S) Boosted by successes
-        bool is_decarbonized;     ///< Schmitt Trigger state
+        double satisfaction;      ///< (S) Boosted by SSN One-Shot Successes
+
+        // 3. Hysteresis Thresholds (The Schmitt Trigger points)
+        double high_threshold;    ///< Switch to EV
+        double low_threshold;     ///< Revert to ICE
+        
+        // 4. The Discrete State (The Output)
+        bool is_decarbonized;     ///< True if currently in a low-carbon state (e.g., BEV or FCEV)
     };
 
     /** @struct ROI_Component @brief Economic/Social viability. */

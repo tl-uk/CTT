@@ -36,7 +36,7 @@ cmake --build build
 ------
 # Run a Clean Build
 rm -rf build
-cmake -B build -S .
+cmake -B build -S . -DCMAKE_OSX_ARCHITECTURES="arm64" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build build
 
 # Clean start

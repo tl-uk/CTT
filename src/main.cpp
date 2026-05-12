@@ -4,7 +4,6 @@
 #include "SimulationEngine.hpp"
 #include "DataBridge.hpp"
 
-
 int main() {
     std::cout << "--- CTT Master Engine Online ---" << std::endl;
     

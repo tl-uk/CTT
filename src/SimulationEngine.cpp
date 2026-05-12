@@ -113,4 +113,24 @@ void SimulationEngine::initialize_test_fleet() {
     std::cout << "[L3 Core] Test fleet initialized with HDS Mindset models." << std::endl;
 }
 
+void CTT::SimulationEngine::register_reflection() {
+    // This maps the C++ struct members so the web Explorer can display them
+    world.component<MindsetComponent>()
+        .member<double>("adversarial_pressure")
+        .member<double>("habit_resistance")
+        .member<double>("satisfaction")
+        .member<double>("high_threshold")
+        .member<double>("low_threshold")
+        .member<bool>("is_decarbonized");
+
+    world.component<EnergyComponent>()
+        .member<float>("currentEnergyStorage")
+        .member<float>("maxCapacity")
+        .member<float>("baseEfficiency");
+        
+    world.component<KinematicComponent>()
+        .member<float>("speed_mps")
+        .member<float>("heading_deg");
+}
+
 } // namespace CTT

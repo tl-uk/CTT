@@ -25,9 +25,10 @@ namespace CTT {
     private:
         flecs::world world;
 
-        /** * @brief Registers all Flecs systems (Energy, Kinematics, etc.) 
-         * FIXED: Added this declaration to match the .cpp definition.
-         */
+        /** @brief Maps struct variables so they appear in the Flecs Explorer UI */
+        void register_reflection();
+
+        /** @brief Registers all Flecs systems (Energy, Kinematics, etc.) */
         void register_systems(); 
     };
 

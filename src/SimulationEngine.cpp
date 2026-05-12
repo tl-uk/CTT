@@ -91,21 +91,20 @@ void SimulationEngine::register_systems() {
     // This system simulates the L3 Strategic layer (e.g., BPTK-Py) by 
     // slowly ramping up adversarial pressure over time.
     world.system<MindsetComponent>("MarketPressureSystem")
-        .run([](flecs::iter& it) {
-            auto m = it.field<MindsetComponent>(0);
-            
-            // Rate of pressure increase (e.g., 0.5 units per simulated second)
-            const float tax_ramp_rate = 0.5f; 
+    .run([](flecs::iter& it) {
+        const float tax_ramp_rate = 0.5f;
 
-            while (it.next()) {
-                for (auto i : it) {
-                    // Only ramp pressure for agents not yet decarbonized
-                    if (!m[i].is_decarbonized) {
-                        m[i].adversarial_pressure += tax_ramp_rate * it.delta_time();
-                    }
+        while (it.next()) {
+            auto m = it.field<MindsetComponent>(0); 
+            
+            for (auto i : it) {
+                // HDS Logic: Only ramp pressure for agents in the 'Legacy' state
+                if (!m[i].is_decarbonized) {
+                    m[i].adversarial_pressure += tax_ramp_rate * it.delta_time();
                 }
             }
-        });
+        }
+    });
 }
 
 void SimulationEngine::initialize_test_fleet() {

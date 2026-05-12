@@ -114,7 +114,7 @@ http://localhost:8000
 # The local Explorer page will automatically detect and connect to CTT_Engine's REST API on localhost:27750.
 | Terminal 1 (keep running)     | Terminal 2 (new tab)                 | Browser                 
 | ------------------------      | -----------------------------        | ----------------------- 
-| cd ~/Dev/CTT                  | cd ~/explorer/etc.                   | 
+| cd ~/Dev/CTT                  | cd ~/explorer/etc.                   | http://localhost:8000
 | ./build/CTT_Engine            | python3 -m http.server 8000          |                         
 
 ------

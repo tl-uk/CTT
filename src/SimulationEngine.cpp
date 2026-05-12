@@ -86,6 +86,26 @@ void SimulationEngine::register_systems() {
                 }
             }
         });
+
+    // --- SYSTEM 3: MARKET PRESSURE (Policy/Economic Influence) ---
+    // This system simulates the L3 Strategic layer (e.g., BPTK-Py) by 
+    // slowly ramping up adversarial pressure over time.
+    world.system<MindsetComponent>("MarketPressureSystem")
+        .run([](flecs::iter& it) {
+            auto m = it.field<MindsetComponent>(0);
+            
+            // Rate of pressure increase (e.g., 0.5 units per simulated second)
+            const float tax_ramp_rate = 0.5f; 
+
+            while (it.next()) {
+                for (auto i : it) {
+                    // Only ramp pressure for agents not yet decarbonized
+                    if (!m[i].is_decarbonized) {
+                        m[i].adversarial_pressure += tax_ramp_rate * it.delta_time();
+                    }
+                }
+            }
+        });
 }
 
 void SimulationEngine::initialize_test_fleet() {

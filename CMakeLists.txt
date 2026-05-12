@@ -7,6 +7,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # --- Force old fetched dependencies to work with modern CMake ---
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
+# --- Suppress ranlib "no symbols" warnings on macOS ---
+if(APPLE)
+    set(CMAKE_C_ARCHIVE_FINISH   "<CMAKE_RANLIB> -no_warning_for_no_symbols <TARGET>")
+    set(CMAKE_CXX_ARCHIVE_FINISH "<CMAKE_RANLIB> -no_warning_for_no_symbols <TARGET>")
+endif()
+
 include(FetchContent)
 
 # -----------------------------------------------------------------------------
@@ -21,7 +27,8 @@ endif()
 # 1. Flecs Global Configuration
 # -----------------------------------------------------------------------------
 set(FLECS_REST ON CACHE BOOL "Enable Flecs REST API" FORCE)
-set(FLECS_MONITOR ON CACHE BOOL "Enable Flecs Monitor Module" FORCE)
+# v4: monitor addon renamed to stats
+set(FLECS_STATS ON CACHE BOOL "Enable Flecs Stats Module" FORCE)
 set(FLECS_SYSTEM ON CACHE BOOL "Enable Flecs System Module" FORCE)
 set(FLECS_CPP ON CACHE BOOL "Enable Flecs C++ API" FORCE)
 
@@ -94,11 +101,11 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cppzmq)
 
-# Flecs
+# Flecs v4.1.5
 FetchContent_Declare(
     flecs
     GIT_REPOSITORY https://github.com/SanderMertens/flecs.git
-    GIT_TAG v3.2.11 
+    GIT_TAG v4.1.5 
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(flecs)
@@ -113,7 +120,11 @@ add_executable(CTT_Engine
 )
 
 target_include_directories(CTT_Engine PRIVATE include)
-target_compile_definitions(CTT_Engine PRIVATE FLECS_REST)
+
+# Suppress C++20 deprecated-literal-operator warnings from cppzmq headers
+target_compile_options(CTT_Engine PRIVATE 
+    $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wno-deprecated-literal-operator>
+)
 
 target_link_libraries(CTT_Engine PRIVATE 
     flecs

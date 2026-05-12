@@ -5,7 +5,7 @@ namespace CTT {
 
 SimulationEngine::SimulationEngine() {
     // 1. Core Modules
-    world.import<flecs::monitor>();
+    world.import<flecs::stats>(); // v4: 'monitor' renamed to 'stats'
     
     // 2. REST API Configuration [cite: 10]
     // Note: In Flecs v3.2+, simply setting the flecs::Rest component 

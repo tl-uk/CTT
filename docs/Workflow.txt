@@ -92,6 +92,31 @@ Quick Reference Commands
 | **Rebuild only**         | cmake --build build                                                                                                                                              
 | **Full reset**           | rm -rf build .venv && uv venv --python 3.13 && source .venv/bin/activate && uv pip install -r requirements.txt && cmake -B build -G Ninja && cmake --build build
 
+
+——————————
+
+# Running locally hosted Flecs
+# Go to any directory (your home folder is fine)
+cd ~
+
+# Clone the explorer (one-time only)
+git clone https://github.com/flecs-hub/explorer.git
+
+# Enter the folder that contains the static files (in a new terminal)
+cd explorer/etc
+
+# Start a local HTTP server
+python3 -m http.server 8000
+
+# Open Chrome and go to:
+http://localhost:8000
+
+# The local Explorer page will automatically detect and connect to CTT_Engine's REST API on localhost:27750.
+| Terminal 1 (keep running)     | Terminal 2 (new tab)                 | Browser                 
+| ------------------------      | -----------------------------        | ----------------------- 
+| cd ~/Dev/CTT                  | cd ~/explorer/etc`                   | http://localhost:8000 
+| ./build/CTT_Engine            | python3 -m http.server 8000`         |                         
+
 ------
 Test ZMQ
 

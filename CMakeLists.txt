@@ -1,8 +1,4 @@
 cmake_minimum_required(VERSION 3.25)
-
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-
-# project() must enable C for the Flecs core, alongside CXX for its API
 project(CTT_Engine LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -11,9 +7,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(FetchContent)
 
 # -----------------------------------------------------------------------------
-# 1. Flecs Global Configuration (Must be set BEFORE FetchContent_MakeAvailable)
+# 0. Apple Silicon / Homebrew Auto-Detection (IDE-Proofing)
 # -----------------------------------------------------------------------------
-# These variables ensure the modules needed for the Digital Twin are compiled.
+# This ensures VS Code and other IDEs automatically find Homebrew libraries 
+# on your M3 and M3 Max without manual command-line flags. Safely ignored on Windows/Linux.
+if(APPLE AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm64")
+    message(STATUS "Apple Silicon detected. Adding /opt/homebrew to search paths.")
+    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
+endif()
+
+# -----------------------------------------------------------------------------
+# 1. Flecs Global Configuration
+# -----------------------------------------------------------------------------
 set(FLECS_REST ON CACHE BOOL "Enable Flecs REST API" FORCE)
 set(FLECS_MONITOR ON CACHE BOOL "Enable Flecs Monitor Module" FORCE)
 set(FLECS_SYSTEM ON CACHE BOOL "Enable Flecs System Module" FORCE)
@@ -22,25 +27,29 @@ set(FLECS_CPP ON CACHE BOOL "Enable Flecs C++ API" FORCE)
 # -----------------------------------------------------------------------------
 # 2. Dependencies
 # -----------------------------------------------------------------------------
-
-# Threads is required for ZeroMQ and the Flecs REST server background threads
 find_package(Threads REQUIRED)
 
-# nlohmann_json (Digital Shadow Telemetry)
-find_package(nlohmann_json QUIET)
-if(NOT nlohmann_json_FOUND)
-    message(STATUS "Fetching nlohmann_json...")
-    FetchContent_Declare(
-        json
-        URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz
-    )
-    FetchContent_MakeAvailable(json)
+# nlohmann_json
+FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz)
+FetchContent_MakeAvailable(json)
+
+# ZeroMQ (Multi-Platform Resolution Strategy)
+# Strategy: Try PkgConfig first (Mac/Linux), fallback to standard find_package (Windows)
+find_package(PkgConfig QUIET)
+if(PKG_CONFIG_FOUND)
+    pkg_check_modules(ZMQ QUIET libzmq)
 endif()
 
-# ZeroMQ / cppzmq (Messaging Layer)
-find_package(cppzmq REQUIRED)
+if(NOT ZMQ_FOUND)
+    message(STATUS "PkgConfig did not find ZeroMQ. Falling back to standard find_package (Windows/vcpkg mode).")
+    find_package(ZeroMQ REQUIRED)
+endif()
 
-# Flecs (Multi-scale ECS & Digital Twin Explorer)
+# Fetch cppzmq headers to ensure they are present regardless of local setup
+FetchContent_Declare(cppzmq GIT_REPOSITORY https://github.com/zeromq/cppzmq.git GIT_TAG v4.10.0)
+FetchContent_MakeAvailable(cppzmq)
+
+# Flecs (Digital Twin Engine)
 FetchContent_Declare(
     flecs
     GIT_REPOSITORY https://github.com/SanderMertens/flecs.git
@@ -57,11 +66,18 @@ add_executable(CTT_Engine
     src/DataBridge.cpp
 )
 
+# Base include directories
 target_include_directories(CTT_Engine PRIVATE include)
 
-# --- THE FIX: Apply this to ALL platforms (M3, Linux, Windows) ---
+# Conditionally add ZMQ includes if found via PkgConfig
+if(ZMQ_FOUND)
+    target_include_directories(CTT_Engine PRIVATE ${ZMQ_INCLUDE_DIRS})
+endif()
+
+# THE FIX: Apply REST definitions to ALL platforms (Fixes namespace errors on M3/Clang/GCC/MSVC)
 target_compile_definitions(CTT_Engine PRIVATE FLECS_REST)
 
+# Link core libraries
 target_link_libraries(CTT_Engine PRIVATE 
     flecs
     nlohmann_json::nlohmann_json 
@@ -69,10 +85,9 @@ target_link_libraries(CTT_Engine PRIVATE
     Threads::Threads
 )
 
-# -----------------------------------------------------------------------------
-# 4. Platform-Specific Tweaks
-# -----------------------------------------------------------------------------
-if(MSVC)
-    # This ensures the REST types are visible in your C++ code on all platforms
-    target_compile_definitions(CTT_Engine PRIVATE FLECS_REST)
+# Link ZeroMQ conditionally based on how the system found it
+if(ZMQ_FOUND)
+    target_link_libraries(CTT_Engine PRIVATE ${ZMQ_LIBRARIES}) # Mac/Linux
+else()
+    target_link_libraries(CTT_Engine PRIVATE libzmq) # Windows
 endif()

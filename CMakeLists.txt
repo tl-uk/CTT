@@ -7,10 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(FetchContent)
 
 # -----------------------------------------------------------------------------
-# 0. Apple Silicon / Homebrew Auto-Detection (IDE-Proofing)
+# 0. Apple Silicon / Homebrew Auto-Detection
 # -----------------------------------------------------------------------------
-# This ensures VS Code and other IDEs automatically find Homebrew libraries 
-# on your M3 and M3 Max without manual command-line flags. Safely ignored on Windows/Linux.
 if(APPLE AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm64")
     message(STATUS "Apple Silicon detected. Adding /opt/homebrew to search paths.")
     list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
@@ -29,31 +27,36 @@ set(FLECS_CPP ON CACHE BOOL "Enable Flecs C++ API" FORCE)
 # -----------------------------------------------------------------------------
 find_package(Threads REQUIRED)
 
-# nlohmann_json
-FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz)
-FetchContent_MakeAvailable(json)
-
-# ZeroMQ (Multi-Platform Resolution Strategy)
-# Strategy: Try PkgConfig first (Mac/Linux), fallback to standard find_package (Windows)
-find_package(PkgConfig QUIET)
-if(PKG_CONFIG_FOUND)
-    pkg_check_modules(ZMQ QUIET libzmq)
+# Hardened nlohmann_json: Try local first, then fetch
+find_package(nlohmann_json QUIET)
+if(NOT nlohmann_json_FOUND)
+    message(STATUS "nlohmann_json not found locally. Attempting fetch...")
+    FetchContent_Declare(
+        json
+        URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(json)
 endif()
 
-if(NOT ZMQ_FOUND)
-    message(STATUS "PkgConfig did not find ZeroMQ. Falling back to standard find_package (Windows/vcpkg mode).")
-    find_package(ZeroMQ REQUIRED)
-endif()
+# ZeroMQ / cppzmq
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ZMQ REQUIRED libzmq)
 
-# Fetch cppzmq headers to ensure they are present regardless of local setup
-FetchContent_Declare(cppzmq GIT_REPOSITORY https://github.com/zeromq/cppzmq.git GIT_TAG v4.10.0)
+FetchContent_Declare(
+    cppzmq 
+    GIT_REPOSITORY https://github.com/zeromq/cppzmq.git 
+    GIT_TAG v4.10.0
+    GIT_SHALLOW TRUE # Added to speed up download
+)
 FetchContent_MakeAvailable(cppzmq)
 
-# Flecs (Digital Twin Engine)
+# Flecs
 FetchContent_Declare(
     flecs
     GIT_REPOSITORY https://github.com/SanderMertens/flecs.git
     GIT_TAG v3.2.11 
+    GIT_SHALLOW TRUE # Added to speed up download
 )
 FetchContent_MakeAvailable(flecs)
 
@@ -66,28 +69,13 @@ add_executable(CTT_Engine
     src/DataBridge.cpp
 )
 
-# Base include directories
-target_include_directories(CTT_Engine PRIVATE include)
-
-# Conditionally add ZMQ includes if found via PkgConfig
-if(ZMQ_FOUND)
-    target_include_directories(CTT_Engine PRIVATE ${ZMQ_INCLUDE_DIRS})
-endif()
-
-# THE FIX: Apply REST definitions to ALL platforms (Fixes namespace errors on M3/Clang/GCC/MSVC)
+target_include_directories(CTT_Engine PRIVATE include ${ZMQ_INCLUDE_DIRS})
 target_compile_definitions(CTT_Engine PRIVATE FLECS_REST)
 
-# Link core libraries
 target_link_libraries(CTT_Engine PRIVATE 
     flecs
     nlohmann_json::nlohmann_json 
     cppzmq
     Threads::Threads
+    ${ZMQ_LIBRARIES}
 )
-
-# Link ZeroMQ conditionally based on how the system found it
-if(ZMQ_FOUND)
-    target_link_libraries(CTT_Engine PRIVATE ${ZMQ_LIBRARIES}) # Mac/Linux
-else()
-    target_link_libraries(CTT_Engine PRIVATE libzmq) # Windows
-endif()

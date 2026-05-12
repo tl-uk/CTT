@@ -4,6 +4,9 @@ project(CTT_Engine LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# --- Force old fetched dependencies to work with modern CMake ---
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
 include(FetchContent)
 
 # -----------------------------------------------------------------------------

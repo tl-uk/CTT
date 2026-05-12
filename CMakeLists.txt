@@ -57,11 +57,11 @@ add_executable(CTT_Engine
     src/DataBridge.cpp
 )
 
-# Ensures headers in include/ (like SimulationEngine.hpp) are found
 target_include_directories(CTT_Engine PRIVATE include)
 
-# Link Libraries
-# Note: Linking Threads::Threads is critical for background simulation tasks
+# --- THE FIX: Apply this to ALL platforms (M3, Linux, Windows) ---
+target_compile_definitions(CTT_Engine PRIVATE FLECS_REST)
+
 target_link_libraries(CTT_Engine PRIVATE 
     flecs
     nlohmann_json::nlohmann_json 
@@ -73,5 +73,6 @@ target_link_libraries(CTT_Engine PRIVATE
 # 4. Platform-Specific Tweaks
 # -----------------------------------------------------------------------------
 if(MSVC)
-    target_compile_definitions(CTT_Engine PRIVATE NOMINMAX)
+    # This ensures the REST types are visible in your C++ code on all platforms
+    target_compile_definitions(CTT_Engine PRIVATE FLECS_REST)
 endif()

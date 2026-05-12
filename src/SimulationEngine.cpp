@@ -10,11 +10,15 @@ SimulationEngine::SimulationEngine() {
     // 2. REST API Configuration [cite: 10]
     // Note: In Flecs v3.2+, simply setting the flecs::Rest component 
     // automatically imports the module and starts the server on port 27750.
-#if defined(FLECS_REST) || defined(flecs_rest_EXPORTS)
-    world.set<flecs::Rest>({}); 
-    std::cout << "[L3 Core] Flecs REST API/Explorer active on port 27750" << std::endl;
-#else
-    std::cout << "[L3 Core] Warning: REST module not detected. Explorer disabled." << std::endl;
+#ifdef FLECS_REST
+    // Use the Macro if the template is giving you namespace errors.
+    // This resolves at the C-level and is immune to C++ namespace shadowing.
+    ECS_IMPORT(world.c_ptr(), FlecsRest);
+
+    // Set the port using the stable C struct
+    world.set<EcsRest>({ .port = 27750 });
+
+    std::cout << "[L3 Core] REST API active on port 27750" << std::endl;
 #endif
 
     // 3. Register our "Muscle" and "Cognition" systems
@@ -31,30 +35,28 @@ void SimulationEngine::update(float delta_time) {
 
 void SimulationEngine::register_systems() {
     
-    // --- SYSTEM 1: SCHMITT TRIGGER (Cognitive HDS) ---
+    // --- SYSTEM 1: SCHMITT TRIGGER (HDS Cognitive Logic) ---
     // Evaluates adversarial pressure against habit resistance thresholds.
-    world.system<MindsetComponent>("SchmittTriggerSystem")
-        .kind(flecs::PreUpdate) // Ensure mindset state is set before physics calcs
+    world.system<MindsetComponent>("SchmittTriggerSystem") // This system manages the decarbonization state "latch"
+        .kind(flecs::PreUpdate) 
         .iter([](flecs::iter& it, MindsetComponent* m) {
             for (auto i : it) {
                 auto entity = it.entity(i);
-
-                // HDS Coupling: Dynamic thresholds influenced by Habit (H) and Satisfaction (S)
+                
+                // HDS Math: Calculate thresholds influenced by behavior
                 double effective_high = m[i].high_threshold + m[i].habit_resistance;
                 double effective_low = m[i].low_threshold - m[i].satisfaction;
 
-                // State Transition Logic (The "Latch")
+                // State Transition Latch
                 if (!m[i].is_decarbonized) {
                     if (m[i].adversarial_pressure >= effective_high) {
                         m[i].is_decarbonized = true;
-                        entity.add<MindsetShiftEvent>(); // Broadcast to Layer 5 [cite: 7]
-                        std::cout << "[L3] Agent " << entity.name() << " crossed High Threshold -> Green." << std::endl;
+                        std::cout << "[L3] Agent " << entity.name() << " switched to GREEN." << std::endl;
                     }
                 } else {
                     if (m[i].adversarial_pressure <= effective_low) {
                         m[i].is_decarbonized = false;
-                        entity.add<MindsetRegressionEvent>();
-                        std::cout << "[L3] Agent " << entity.name() << " dropped below Low Threshold -> Legacy." << std::endl;
+                        std::cout << "[L3] Agent " << entity.name() << " regressed to LEGACY." << std::endl;
                     }
                 }
             }
@@ -71,7 +73,7 @@ void SimulationEngine::register_systems() {
                     load_multiplier += (payload[i].currentLoadKg / payload[i].maxCapacityKg);
                 }
 
-                // Standard physics-based consumption
+                // Consumption math based on speed and load
                 float consumption = energy[i].baseEfficiency * (kin[i].speed_mps / 10.0f) * load_multiplier * it.delta_time();
                 energy[i].currentEnergyStorage -= consumption;
                 
@@ -82,7 +84,7 @@ void SimulationEngine::register_systems() {
 
 void SimulationEngine::initialize_test_fleet() {
     // Creating an eHGV with both Reflexive (Energy) and Cognitive (Mindset) properties
-    world.entity("Volvo_eHGV_001")
+    world.entity("Volvo_eHGV_001") // Initializing the Volvo eHGV with full HDS Mindset data
         .add<MicroActive>()
         .set<TaxonomyComponent>({TransportMode::ROAD_MOTORIZED, 2, false})
         .set<PayloadComponent>({CargoType::PALLETISED, 15000.0f, 40000.0f, 1, 2})
@@ -91,8 +93,8 @@ void SimulationEngine::initialize_test_fleet() {
         .set<PositionComponent>({55.9533, -3.1883, 50.0f})
         .set<MindsetComponent>({
             0.0,    // adversarial_pressure
-            15.0,   // habit_resistance (H)
-            2.0,    // satisfaction (S)
+            15.0,   // habit_resistance
+            2.0,    // satisfaction
             10.0,   // high_threshold
             5.0,    // low_threshold
             false   // is_decarbonized

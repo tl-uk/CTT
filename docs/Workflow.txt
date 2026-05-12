@@ -15,46 +15,82 @@ cmake --build build
 uv pip install -r requirements.txt
 
 ------
-# "New Computer" installation Checklist workflow:
+# CTT Engine — New Computer Setup Workflow
 
-# Clone the repo (Use the SSH URL now)
+## 1. Clone the Repository
+```bash
 git clone git@github.com:tl-uk/CTT.git
 cd CTT
 
-# 1. Reconstruct the C++ Environment (Uses your Brewfile)
+## 2. Install System Dependencies (macOS)
+# Apple Silicon note: This project requires native arm64 libraries. Homebrew on Apple Silicon installs to /opt/homebrew, 
+# which the CMakeLists.txt auto-detects.
+```bash
+# Install core build tools
+brew install cmake ninja pkg-config
+
+# Install project libraries (ZeroMQ is required before CMake configure)
+brew install zeromq
+
+# Install everything else declared in the repo Brewfile
 brew bundle
 
-# 2. Reconstruct the Python Environment (Uses your requirements.txt)
-uv venv --python 3.13
-source .venv/bin/activate
-uv pip install -r requirements.txt
+——————
 
-# 3. Build the Engine
-cmake -B build -S .
+## 3. Build the C++ Engine
+# Standard Build (Daily Use)
+```bash
+cmake -B build -G Ninja
 cmake --build build
 
-------
-# Run a Clean Build
+# Clean Build (First Time or After CMake Changes)
+# Required flags for modern CMake compatibility: Fetched dependencies (cppzmq, flecs) contain legacy 
+# cmake_minimum_required declarations. Without the policy override, CMake 3.31+ hard-fails.
+```bash
 rm -rf build
-cmake -B build -S . -DCMAKE_OSX_ARCHITECTURES="arm64" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build build
-# Check if the final binary was linked successfully:
+
+# Verify the Binary
+```bash
+# Check that it exists
 ls -l build/CTT_Engine
-# Check arm64
+
+# Verify architecture (should say 'arm64', not 'x86_64')
 file build/CTT_Engine
-# Run the executable
+
+# Quick smoke test
 ./build/CTT_Engine
 
-# Clean start
-rm -rf .venv
-# Use 3.13 (Native arm64 and highly stable)
+————————
+
+## 4. Set Up Python Environment
+# Recommended: Use uv for fast, deterministic Python management.
+```bash
+# Create venv with native arm64 Python 3.13
 uv venv --python 3.13
 source .venv/bin/activate
-# Download pre-built files
+
+# Install Python dependencies
+uv pip install -r requirements.txt
+
+# Python Dependencies (If Not in requirements.txt)
+# If the project needs SUMO or ZeroMQ bindings outside the requirements file:
+```bash
 uv pip install bptk-py pyzmq eclipse-sumo
 
-# Quick clean and build
-rm -rf build && cmake -B build -G Ninja
+————————
+Quick Reference Commands
+
+| Task                     | Command                                                                                                                                                            
+| -----------------------  | ------------------------------------------------------------------------------------------------------------------------------------------------
+| **Clean everything**     | rm -rf build .venv		                                                                                                                                    
+| **Clean + rebuild C++**  | rm -rf build && cmake -B build -G Ninja && cmake --build build                                                                         
+| **Rebuild only**         | cmake --build build                                                                                                                                              
+| **Full reset**           | rm -rf build .venv && uv venv --python 3.13 && source .venv/bin/activate && uv pip install -r requirements.txt && cmake -B build -G Ninja && cmake --build build
 
 ------
 Test ZMQ

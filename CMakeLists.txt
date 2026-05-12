@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.25...3.31)
 project(CTT_Engine LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -30,24 +30,60 @@ find_package(Threads REQUIRED)
 # Hardened nlohmann_json: Try local first, then fetch
 find_package(nlohmann_json QUIET)
 if(NOT nlohmann_json_FOUND)
-    message(STATUS "nlohmann_json not found locally. Attempting fetch...")
+    message(STATUS "nlohmann_json not found locally. Fetching v3.12.0...")
     FetchContent_Declare(
         json
-        URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz
+        URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(json)
 endif()
 
-# ZeroMQ / cppzmq
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(ZMQ REQUIRED libzmq)
+# --- ZeroMQ / cppzmq (Multi-platform) ---
+# Try CMake config first (works with vcpkg, conda, manual installs)
+find_package(ZeroMQ QUIET)
+
+if(NOT ZeroMQ_FOUND)
+    # Fall back to pkg-config (Linux package managers, macOS Homebrew)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        # Help macOS Homebrew find the .pc file
+        if(APPLE AND EXISTS "/opt/homebrew/opt/zeromq/lib/pkgconfig")
+            set(ENV{PKG_CONFIG_PATH} "/opt/homebrew/opt/zeromq/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+        endif()
+        
+        pkg_check_modules(ZeroMQ QUIET libzmq)
+    endif()
+endif()
+
+if(NOT ZeroMQ_FOUND)
+    message(FATAL_ERROR 
+        "ZeroMQ not found.\n"
+        "Install instructions:\n"
+        "  macOS:   brew install pkg-config zeromq\n"
+        "  Ubuntu:  sudo apt install pkg-config libzmq3-dev\n"
+        "  Windows: vcpkg install zeromq\n"
+        "  Or set ZeroMQ_DIR to the directory containing ZeroMQConfig.cmake"
+    )
+endif()
+
+# cppzmq expects a 'libzmq' target. If we found ZeroMQ via pkg-config, create one.
+if(ZeroMQ_FOUND AND NOT TARGET libzmq)
+    if(ZeroMQ_LINK_LIBRARIES OR ZeroMQ_LIBRARIES)
+        add_library(libzmq INTERFACE IMPORTED)
+        target_link_libraries(libzmq INTERFACE ${ZeroMQ_LINK_LIBRARIES} ${ZeroMQ_LIBRARIES})
+        target_include_directories(libzmq INTERFACE ${ZeroMQ_INCLUDE_DIRS})
+        if(ZeroMQ_LIBRARY_DIRS)
+            target_link_directories(libzmq INTERFACE ${ZeroMQ_LIBRARY_DIRS})
+        endif()
+    endif()
+endif()
 
 FetchContent_Declare(
     cppzmq 
     GIT_REPOSITORY https://github.com/zeromq/cppzmq.git 
     GIT_TAG v4.10.0
-    GIT_SHALLOW TRUE # Added to speed up download
+    GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(cppzmq)
 
@@ -56,7 +92,7 @@ FetchContent_Declare(
     flecs
     GIT_REPOSITORY https://github.com/SanderMertens/flecs.git
     GIT_TAG v3.2.11 
-    GIT_SHALLOW TRUE # Added to speed up download
+    GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(flecs)
 
@@ -69,7 +105,7 @@ add_executable(CTT_Engine
     src/DataBridge.cpp
 )
 
-target_include_directories(CTT_Engine PRIVATE include ${ZMQ_INCLUDE_DIRS})
+target_include_directories(CTT_Engine PRIVATE include)
 target_compile_definitions(CTT_Engine PRIVATE FLECS_REST)
 
 target_link_libraries(CTT_Engine PRIVATE 
@@ -77,5 +113,4 @@ target_link_libraries(CTT_Engine PRIVATE
     nlohmann_json::nlohmann_json 
     cppzmq
     Threads::Threads
-    ${ZMQ_LIBRARIES}
 )

@@ -82,6 +82,10 @@ if(ZeroMQ_FOUND AND NOT TARGET libzmq)
     endif()
 endif()
 
+# --- Prevent cppzmq from building tests/examples (avoids Catch2 fetch) ---
+set(CPPZMQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(CPPZMQ_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
 FetchContent_Declare(
     cppzmq 
     GIT_REPOSITORY https://github.com/zeromq/cppzmq.git 

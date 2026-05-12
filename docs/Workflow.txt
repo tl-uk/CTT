@@ -53,6 +53,9 @@ source .venv/bin/activate
 # Download pre-built files
 uv pip install bptk-py pyzmq eclipse-sumo
 
+# Quick clean and build
+rm -rf build && cmake -B build -G Ninja
+
 ------
 Test ZMQ
 

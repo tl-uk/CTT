@@ -17,6 +17,7 @@ SimulationEngine::SimulationEngine() {
     std::cout << "[L3 Core] REST API active on port 27750" << std::endl;
 #endif
 
+    register_reflection();
     register_systems();
 }
 

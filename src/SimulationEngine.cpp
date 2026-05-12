@@ -31,99 +31,84 @@ void SimulationEngine::update(float delta_time) {
 void SimulationEngine::register_systems() {
     
     // --- SYSTEM 1: SCHMITT TRIGGER (HDS Cognitive Logic) ---
-    // v4: .iter() removed → use .run() with while(it.next())
-    // v4: field indices start at 0 (not 1)
+    // v4: .each() with (iter, index, component&) signature is idiomatic
     world.system<MindsetComponent>("SchmittTriggerSystem")
         .kind(flecs::PreUpdate) 
-        .run([](flecs::iter& it) {
-            while (it.next()) {
-                auto m = it.field<MindsetComponent>(0);
-                for (auto i : it) {
-                    auto entity = it.entity(i);
-                    
-                    // HDS Math: Calculate thresholds influenced by behavior
-                    double effective_high = m[i].high_threshold + m[i].habit_resistance;
-                    double effective_low = m[i].low_threshold - m[i].satisfaction;
+        .each([](flecs::iter& it, size_t i, MindsetComponent& m) {
+            auto entity = it.entity(i);
+            
+            // HDS Math: Calculate thresholds influenced by behavior
+            double effective_high = m.high_threshold + m.habit_resistance;
+            double effective_low = m.low_threshold - m.satisfaction;
 
-                    // State Transition Latch
-                    if (!m[i].is_decarbonized) {
-                        if (m[i].adversarial_pressure >= effective_high) {
-                            m[i].is_decarbonized = true;
-                            std::cout << "[L3] Agent " << entity.name() << " switched to GREEN." << std::endl;
-                        }
-                    } else {
-                        if (m[i].adversarial_pressure <= effective_low) {
-                            m[i].is_decarbonized = false;
-                            std::cout << "[L3] Agent " << entity.name() << " regressed to LEGACY." << std::endl;
-                        }
-                    }
+            // State Transition Latch
+            if (!m.is_decarbonized) {
+                if (m.adversarial_pressure >= effective_high) {
+                    m.is_decarbonized = true;
+                    std::cout << "[L3] Agent " << entity.name() << " switched to GREEN." << std::endl;
+                }
+            } else {
+                if (m.adversarial_pressure <= effective_low) {
+                    m.is_decarbonized = false;
+                    std::cout << "[L3] Agent " << entity.name() << " regressed to LEGACY." << std::endl;
                 }
             }
         });
 
     // --- SYSTEM 2: ENERGY CONSUMPTION (Reflexive Muscle) ---
-    // v4: .iter() removed → use .run() with while(it.next())
-    // v4: field indices start at 0 (not 1)
+    // v4: .each() cleanly provides all components by reference
     world.system<KinematicComponent, EnergyComponent, const PayloadComponent>("EnergyConsumptionSystem")
         .with<MicroActive>()
-        .run([](flecs::iter& it) {
-            while (it.next()) {
-                auto kin = it.field<KinematicComponent>(0);
-                auto energy = it.field<EnergyComponent>(1);
-                auto payload = it.field<const PayloadComponent>(2);
-                
-                for (auto i : it) {
-                    float load_multiplier = 1.0f;
-                    if (payload[i].maxCapacityKg > 0) {
-                        load_multiplier += (payload[i].currentLoadKg / payload[i].maxCapacityKg);
-                    }
-
-                    // Consumption math based on speed and load
-                    float consumption = energy[i].baseEfficiency * (kin[i].speed_mps / 10.0f) * load_multiplier * it.delta_time();
-                    energy[i].currentEnergyStorage -= consumption;
-                    
-                    if (energy[i].currentEnergyStorage < 0) energy[i].currentEnergyStorage = 0;
-                }
+        .each([](flecs::iter& it, size_t i, 
+                 KinematicComponent& kin, 
+                 EnergyComponent& energy, 
+                 const PayloadComponent& payload) {
+            
+            float load_multiplier = 1.0f;
+            if (payload.maxCapacityKg > 0) {
+                load_multiplier += (payload.currentLoadKg / payload.maxCapacityKg);
             }
+
+            // Consumption math based on speed and load
+            float consumption = energy.baseEfficiency * (kin.speed_mps / 10.0f) * load_multiplier * it.delta_time();
+            energy.currentEnergyStorage -= consumption;
+            
+            if (energy.currentEnergyStorage < 0) energy.currentEnergyStorage = 0;
         });
 
-    // --- SYSTEM 3: MARKET PRESSURE (Policy/Economic Influence) ---
-    // This system simulates the L3 Strategic layer (e.g., BPTK-Py) by 
-    // slowly ramping up adversarial pressure over time.
+    // --- SYSTEM 3: MARKET PRESSURE (Strategic L3 Influence) ---
+    // v4: .each() is the cleanest approach for per-entity updates
     world.system<MindsetComponent>("MarketPressureSystem")
-    .run([](flecs::iter& it) {
-        const float tax_ramp_rate = 0.5f;
+        .each([](flecs::iter& it, size_t i, MindsetComponent& m) {
+            // Rate of pressure increase (units per second)
+            const float tax_ramp_rate = 1.2f; 
 
-        while (it.next()) {
-            auto m = it.field<MindsetComponent>(0); 
-            
-            for (auto i : it) {
-                // HDS Logic: Only ramp pressure for agents in the 'Legacy' state
-                if (!m[i].is_decarbonized) {
-                    m[i].adversarial_pressure += tax_ramp_rate * it.delta_time();
-                }
+            // Cognitive HDS Logic: Only ramp pressure if agent is not yet decarbonized
+            if (!m.is_decarbonized) {
+                m.adversarial_pressure += tax_ramp_rate * it.delta_time();
             }
-        }
-    });
+        });
 }
 
 void SimulationEngine::initialize_test_fleet() {
-    // Creating an eHGV with both Reflexive (Energy) and Cognitive (Mindset) properties
-    world.entity("Volvo_eHGV_001")
-        .add<MicroActive>()
-        .set<TaxonomyComponent>({TransportMode::ROAD_MOTORIZED, 2, false})
-        .set<PayloadComponent>({CargoType::PALLETISED, 15000.0f, 40000.0f, 1, 2})
-        .set<EnergyComponent>({PowertrainType::BEV_ELECTRIC, 600.0f, 600.0f, 1.5f})
-        .set<KinematicComponent>({22.0f, 90.0f})
-        .set<PositionComponent>({55.9533, -3.1883, 50.0f})
-        .set<MindsetComponent>({
-            0.0,    // adversarial_pressure
-            15.0,   // habit_resistance
-            2.0,    // satisfaction
-            10.0,   // high_threshold
-            5.0,    // low_threshold
-            false   // is_decarbonized
-        });
+    auto e = world.entity("Volvo_eHGV_001");
+    
+    e.add<MicroActive>();
+    
+    // Explicit temporaries — compiler deduces T from the argument type
+    e.set(TaxonomyComponent{TransportMode::ROAD_MOTORIZED, static_cast<uint8_t>(2), false});
+    e.set(PayloadComponent{CargoType::PALLETISED, 15000.0f, 40000.0f, 1, 2});
+    e.set(EnergyComponent{PowertrainType::BEV_ELECTRIC, 600.0f, 600.0f, 1.5f});
+    e.set(KinematicComponent{22.0f, 90.0f});
+    e.set(PositionComponent{55.9533, -3.1883, 50.0f});
+    e.set(MindsetComponent{
+        0.0,    // adversarial_pressure
+        15.0,   // habit_resistance
+        2.0,    // satisfaction
+        10.0,   // high_threshold
+        5.0,    // low_threshold
+        false   // is_decarbonized
+    });
 
     std::cout << "[L3 Core] Test fleet initialized with HDS Mindset models." << std::endl;
 }

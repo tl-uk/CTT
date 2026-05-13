@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.25...3.31)
 project(CTT_Engine LANGUAGES CXX C)
 
+# Generate compile_commands.json for IDE integration
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "" FORCE)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

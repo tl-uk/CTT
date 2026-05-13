@@ -1,0 +1,8 @@
+syntax = "proto3";
+package ctt;
+
+message MindsetPerturbation {
+    string agent_uuid = 1;
+    double pressure_delta = 2; // e.g., +5.0 due to rail delay
+    string source = 3;         // e.g., "OTP_Rail_Harvester"
+}

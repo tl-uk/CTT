@@ -3,7 +3,8 @@
 # Microservices build orchestration for Apple Silicon (M3)
 # =============================================================================
 
-.PHONY: help all check-deps configure-engine build-engine run-engine         clean-engine setup-python run-dashboard clean-all run-explorer         fmt-engine lint-engine
+.PHONY: help all check-deps configure-engine build-engine run-engine         clean-engine setup-python run-dashboard clean-all run-explorer         fmt-engine lint-engine         run-explorer run-harvester run-interpreter run-fusion \
+         test-bridge stop-pipeline
 
 # Detect CPU cores for parallel builds (macOS/Linux)
 NPROCS := $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
@@ -108,15 +109,53 @@ run-interpreter: ## Run the Semantic Agent (Interpreter)
 	@cd $(L2_DIR) && . .venv/bin/activate && python ../data-pipeline/interpreter/semantic_agent.py
 
 run-fusion: ## Run the Fusion Engine (Command & Control)
-	@echo "⚡ Starting Fusion Engine (Sending perturbations to L1)..."
+	@echo "⚡ Starting Fusion Engine..."
 	@cd $(L2_DIR) && . .venv/bin/activate && python ../data-pipeline/fusion/fusion_engine.py
 
-test-bridge: ## Launch the entire data pipeline in the background (Requires L1 Engine running)
-	@echo "🔄 Launching full Py-C++ Bridge Test..."
-	@make run-harvester & 
-	@make run-interpreter & 
-	@make run-fusion &
-	@echo "✅ Pipeline active. Check your L1 Engine terminal for incoming perturbations."
+# Background variants (for single-terminal use)
+run-harvester-bg: ## Run harvester in background (logs to /tmp)
+	@cd $(L2_DIR) && . .venv/bin/activate && nohup python ../data-pipeline/ingestor/harvester.py > /tmp/ctt_harvester.log 2>&1 &
+	@echo "📡 Harvester backgrounded (log: /tmp/ctt_harvester.log)"
+
+run-interpreter-bg: ## Run interpreter in background
+	@cd $(L2_DIR) && . .venv/bin/activate && nohup python ../data-pipeline/interpreter/semantic_agent.py > /tmp/ctt_interpreter.log 2>&1 &
+	@echo "🧠 Interpreter backgrounded (log: /tmp/ctt_interpreter.log)"
+
+run-fusion-bg: ## Run fusion in background
+	@cd $(L2_DIR) && . .venv/bin/activate && nohup python ../data-pipeline/fusion/fusion_engine.py > /tmp/ctt_fusion.log 2>&1 &
+	@echo "⚡ Fusion backgrounded (log: /tmp/ctt_fusion.log)"
+
+test-bridge: ## Launch full data pipeline (backgrounded)
+	@echo "🔄 Launching pipeline..."
+	@make run-harvester-bg
+	@sleep 1
+	@make run-interpreter-bg
+	@sleep 1
+	@make run-fusion-bg
+	@echo ""
+	@echo "✅ Pipeline active. View logs:"
+	@echo "   tail -f /tmp/ctt_*.log"
+	@echo "   Stop with: make stop-pipeline"
+
+stop-pipeline: ## Kill all background pipeline processes
+	@pkill -f "harvester.py" 2>/dev/null || true
+	@pkill -f "semantic_agent.py" 2>/dev/null || true
+	@pkill -f "fusion_engine.py" 2>/dev/null || true
+	@echo "🛑 Pipeline stopped"
+
+# -----------------------------------------------------------------------------
+# Flecs Explorer — Auto-clone if missing
+# -----------------------------------------------------------------------------
+
+EXPLORER_DIR := $(HOME)/explorer
+
+run-explorer: ## Host Flecs Explorer on http://localhost:8000
+	@if [ ! -d $(EXPLORER_DIR)/etc ]; then \
+		echo "🌐 Explorer not found. Cloning..."; \
+		git clone https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); \
+	fi
+	@echo "🌐 Starting Flecs Explorer at http://localhost:8000"
+	@cd $(EXPLORER_DIR)/etc && python3 -m http.server 8000
 	
 # =============================================================================
 # Global Utilities

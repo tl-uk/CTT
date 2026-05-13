@@ -155,7 +155,7 @@ run-explorer: ## Host Flecs Explorer on http://localhost:8000
 	fi
 	@echo "🌐 Starting Flecs Explorer at http://localhost:8000"
 	@cd $(EXPLORER_DIR)/etc && python3 -m http.server 8000
-	
+
 # =============================================================================
 # Global Utilities
 # =============================================================================

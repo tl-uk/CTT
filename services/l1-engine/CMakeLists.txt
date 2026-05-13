@@ -104,6 +104,28 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cppzmq)
 
+# -----------------------------------------------------------------------------
+# Protobuf Generation
+# -----------------------------------------------------------------------------
+find_package(Protobuf REQUIRED)
+
+set(PROTO_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../../api/proto/ctt_messages.proto)
+get_filename_component(PROTO_DIR ${PROTO_FILE} DIRECTORY)
+
+set(PROTO_SRC ${CMAKE_CURRENT_BINARY_DIR}/ctt_messages.pb.cc)
+set(PROTO_HDR ${CMAKE_CURRENT_BINARY_DIR}/ctt_messages.pb.h)
+
+add_custom_command(
+    OUTPUT ${PROTO_SRC} ${PROTO_HDR}
+    COMMAND ${Protobuf_PROTOC_EXECUTABLE}
+    ARGS --cpp_out=${CMAKE_CURRENT_BINARY_DIR} -I${PROTO_DIR} ${PROTO_FILE}
+    DEPENDS ${PROTO_FILE}
+    COMMENT "Generating C++ from ctt_messages.proto"
+    VERBATIM
+)
+
+add_custom_target(ctt_proto_gen DEPENDS ${PROTO_SRC} ${PROTO_HDR})
+
 # Flecs v4.1.5
 FetchContent_Declare(
     flecs
@@ -120,9 +142,15 @@ add_executable(CTT_Engine
     src/main.cpp
     src/SimulationEngine.cpp
     src/DataBridge.cpp
+    ${PROTO_SRC}
 )
 
-target_include_directories(CTT_Engine PRIVATE include)
+add_dependencies(CTT_Engine ctt_proto_gen)
+
+target_include_directories(CTT_Engine PRIVATE 
+    include 
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
 
 # Suppress C++20 deprecated-literal-operator warnings from cppzmq headers
 target_compile_options(CTT_Engine PRIVATE 
@@ -134,4 +162,5 @@ target_link_libraries(CTT_Engine PRIVATE
     nlohmann_json::nlohmann_json 
     cppzmq
     Threads::Threads
+    protobuf::libprotobuf
 )

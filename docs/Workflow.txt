@@ -94,7 +94,7 @@ Quick Reference Commands
 
 
 ——————————
-
+# Host the Explorer Locally - In a NEW terminal tab, clone and serve the Explorer
 # Running locally hosted Flecs
 # Go to any directory (your home folder is fine)
 cd ~

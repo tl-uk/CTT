@@ -10,16 +10,29 @@ to real-world events in a meaningful way, bridging the gap between raw data and 
 """
 
 import zmq, json
-def run_interpreter():
+
+def run_semantic_interpreter():
     context = zmq.Context()
     sub = context.socket(zmq.SUB)
     sub.connect("tcp://localhost:5560")
     sub.setsockopt_string(zmq.SUBSCRIBE, "")
+    
     pub = context.socket(zmq.PUB)
     pub.bind("tcp://*:5561")
+
+    print("🧠 Semantic Agent: Mapping SME data to CTT Mindset logic...")
+
     while True:
         raw = json.loads(sub.recv_string())
-        # Semantic mapping: Route delay -> Pressure increase
-        interpreted = {"target_category": "HGV", "pressure_mod": raw['impact'] * 0.5}
+        
+        # Mapping Logic: (1.0 - efficiency) * 100 = pressure
+        pressure_calc = (1.0 - raw.get("efficiency_score", 0.5)) * 100
+        
+        interpreted = {
+            "agent_uuid": raw.get("truck_id"),
+            "pressure_delta": pressure_calc
+        }
         pub.send_string(json.dumps(interpreted))
-if __name__ == "__main__": run_interpreter()
+
+if __name__ == "__main__":
+    run_semantic_interpreter()

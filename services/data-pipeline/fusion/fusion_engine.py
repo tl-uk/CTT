@@ -1,3 +1,14 @@
+"""
+services/data-pipeline/fusion/fusion_engine.py
+
+This module implements a "Fusion Engine" that subscribes to interpreted data from the Semantic Interpreter 
+and applies multi-source fusion logic to generate perturbations that can be sent to the L1 Engine. The Fusion 
+Engine acts as a central hub for combining insights from various data sources (e.g., route delays, weather 
+conditions, social media sentiment) and translating them into actionable commands for the simulation. 
+This allows the CTT ecosystem to react to complex, real-world scenarios in a more holistic way, enhancing the 
+realism and responsiveness of the simulation.
+
+"""
 import zmq, json
 def run_fusion():
     context = zmq.Context()

@@ -9,11 +9,13 @@ int main() {
     std::cout << "--- CTT Master Engine Online ---" << std::endl;
     
     CTT::SimulationEngine engine;
-    CTT::DataBridge bridge("tcp://*:5555");
+    // PUB on 5555 (telemetry out), SUB on 5556 (perturbations in)
+    CTT::DataBridge bridge("tcp://*:5555", "tcp://localhost:5556");
 
     engine.initialize_test_fleet();
 
-    std::cout << "[L1 UI] Open your browser to: http://localhost:27750/explorer to view the Digital Twin" << std::endl;
+    std::cout << "[L1 UI] Open Flecs Explorer: http://localhost:8000" << std::endl;
+    std::cout << "[L1 UI] REST API: http://localhost:27750/explorer to view the Digital Twin" << std::endl;
 
     // The Master Clock Loop
     auto last_time = std::chrono::high_resolution_clock::now();
@@ -26,7 +28,10 @@ int main() {
         // 1. Tick the Flecs Reflexive Engine
         engine.update(delta_time);
 
-        // 2. Broadcast the Digital Shadow to Python
+        // 2. Receive perturbations from Python pipeline and apply to the world
+        bridge.receive_perturbations(engine.get_world());
+
+        // 3. Broadcast state to Python dashboard
         bridge.broadcast_state(engine.get_world());
 
         // Sleep to maintain ~10Hz (100ms) tick rate

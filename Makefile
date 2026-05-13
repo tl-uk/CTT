@@ -87,14 +87,13 @@ run-dashboard: ## Run the L2 Bridge dashboard (requires engine running)
 	@cd $(L2_DIR) && . .venv/bin/activate && python dashboard.py
 
 # =============================================================================
-# Flecs Explorer — Local UI
+# L3 Analytics — Python Data Science & ML
 # =============================================================================
+setup-l3: ## Setup L3 Analytics environment
+	@echo "🐍 Setting up L3 Analytics..."
+	@cd $(L3_DIR) && uv venv --python 3.13
+	@cd $(L3_DIR) && . .venv/bin/activate && uv pip install -r requirements.txt
 
-run-explorer: ## Host the Flecs Explorer on http://localhost:8000
-	@echo "🌐 Starting Flecs Explorer..."
-	@echo "   (Ensure you have cloned: git clone https://github.com/flecs-hub/explorer.git ~/explorer)"
-	@test -d ~/explorer/etc || (echo "❌ Explorer not found at ~/explorer/etc. Clone it first." && exit 1)
-	@cd ~/explorer/etc && python3 -m http.server 8000
 
 # =============================================================================
 # Data Pipeline — Inbound Refinery (Test Network)
@@ -143,16 +142,16 @@ stop-pipeline: ## Kill all background pipeline processes
 	@pkill -f "fusion_engine.py" 2>/dev/null || true
 	@echo "🛑 Pipeline stopped"
 
-# -----------------------------------------------------------------------------
-# Flecs Explorer — Auto-clone if missing
-# -----------------------------------------------------------------------------
+# =============================================================================
+# Flecs Explorer — Local UI
+# =============================================================================
 
 EXPLORER_DIR := $(HOME)/explorer
 
 run-explorer: ## Host Flecs Explorer on http://localhost:8000
 	@if [ ! -d $(EXPLORER_DIR)/etc ]; then \
-		echo "🌐 Explorer not found. Cloning..."; \
-		git clone https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); \
+		echo "🌐 Flecs Explorer not found. Cloning to $(EXPLORER_DIR)..."; \
+		git clone --depth 1 https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); \
 	fi
 	@echo "🌐 Starting Flecs Explorer at http://localhost:8000"
 	@cd $(EXPLORER_DIR)/etc && python3 -m http.server 8000

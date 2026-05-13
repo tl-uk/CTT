@@ -75,7 +75,8 @@ void DataBridge::receive_perturbations(flecs::world& world) {
     } else {
         auto e = world.lookup(p.agent_uuid().c_str());
         if (e.is_alive()) {
-            if (auto* m = e.get_mut<MindsetComponent>()) {
+            auto* m = e.try_get<MindsetComponent>();
+            if (m) {
                 m->adversarial_pressure += p.pressure_delta();
             }
         } else {

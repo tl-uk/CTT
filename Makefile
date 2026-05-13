@@ -96,6 +96,29 @@ run-explorer: ## Host the Flecs Explorer on http://localhost:8000
 	@cd ~/explorer/etc && python3 -m http.server 8000
 
 # =============================================================================
+# Data Pipeline — Inbound Refinery (Test Network)
+# =============================================================================
+
+run-harvester: ## Run the mock SME Harvester (Ingestor)
+	@echo "📡 Starting SME Harvester..."
+	@cd $(L2_DIR) && . .venv/bin/activate && python ../data-pipeline/ingestor/harvester.py
+
+run-interpreter: ## Run the Semantic Agent (Interpreter)
+	@echo "🧠 Starting Semantic Interpreter..."
+	@cd $(L2_DIR) && . .venv/bin/activate && python ../data-pipeline/interpreter/semantic_agent.py
+
+run-fusion: ## Run the Fusion Engine (Command & Control)
+	@echo "⚡ Starting Fusion Engine (Sending perturbations to L1)..."
+	@cd $(L2_DIR) && . .venv/bin/activate && python ../data-pipeline/fusion/fusion_engine.py
+
+test-bridge: ## Launch the entire data pipeline in the background (Requires L1 Engine running)
+	@echo "🔄 Launching full Py-C++ Bridge Test..."
+	@make run-harvester & 
+	@make run-interpreter & 
+	@make run-fusion &
+	@echo "✅ Pipeline active. Check your L1 Engine terminal for incoming perturbations."
+	
+# =============================================================================
 # Global Utilities
 # =============================================================================
 

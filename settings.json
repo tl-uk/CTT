@@ -1,0 +1,7 @@
+{
+    "cmake.sourceDirectory": "${workspaceFolder}/services/l1-engine",
+    "cmake.buildDirectory": "${workspaceFolder}/services/l1-engine/build",
+    "cmake.configureOnOpen": true,
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/services/l1-engine/build/compile_commands.json",
+    "C_Cpp.intelliSenseCacheSize": 512
+}

@@ -3,8 +3,11 @@
 # Microservices build orchestration for Apple Silicon (M3)
 # =============================================================================
 
-.PHONY: help all check-deps configure-engine build-engine run-engine         clean-engine setup-python run-dashboard clean-all run-explorer         fmt-engine lint-engine         run-explorer run-harvester run-interpreter run-fusion \
-         test-bridge stop-pipeline
+.PHONY: help all check-deps configure-engine build-engine run-engine \
+        clean-engine setup-python setup-l3 run-dashboard clean-all \
+        run-explorer run-harvester run-interpreter run-fusion \
+        run-harvester-bg run-interpreter-bg run-fusion-bg \
+        test-bridge stop-pipeline fmt-engine lint-engine
 
 # Detect CPU cores for parallel builds (macOS/Linux)
 NPROCS := $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
@@ -24,7 +27,8 @@ help: ## Show this help message
 	@echo "║           CTT Project — Build & Run Commands                 ║"
 	@echo "╚══════════════════════════════════════════════════════════════╝"
 	@echo ""
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", \$$1, \$$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Quick start:"
 	@echo "  1. make check-deps     → Verify Homebrew dependencies"
@@ -49,7 +53,10 @@ check-deps: ## Verify macOS system dependencies (cmake, ninja, pkg-config, zerom
 configure-engine: check-deps ## Configure CMake for L1 Engine (clean configure)
 	@echo "⚙️  Configuring L1 Engine..."
 	@rm -rf $(BUILD_DIR)
-	@cmake -B $(BUILD_DIR) -S $(L1_DIR) -G Ninja 		-DCMAKE_BUILD_TYPE=Release 		-DCMAKE_OSX_ARCHITECTURES=arm64 		-DCMAKE_POLICY_VERSION_MINIMUM=3.5
+	@cmake -B $(BUILD_DIR) -S $(L1_DIR) -G Ninja \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_OSX_ARCHITECTURES=arm64 \
+		-DCMAKE_POLICY_VERSION_MINIMUM=3.5
 	@echo "✅ Configure complete"
 
 build-engine: configure-engine ## Build the C++ L1 Engine with all cores
@@ -65,7 +72,7 @@ run-engine: build-engine ## Build and run the L1 Engine
 	@echo "   REST API:    http://localhost:27750"
 	@echo "   ZMQ Pub:     tcp://localhost:5555"
 	@echo ""
-	@cd $(L1_DIR) && ../../$(BUILD_DIR)/CTT_Engine
+	@./$(BUILD_DIR)/CTT_Engine
 
 clean-engine: ## Remove L1 Engine build artifacts
 	@echo "🧹 Cleaning L1 Engine build..."
@@ -89,11 +96,11 @@ run-dashboard: ## Run the L2 Bridge dashboard (requires engine running)
 # =============================================================================
 # L3 Analytics — Python Data Science & ML
 # =============================================================================
+
 setup-l3: ## Setup L3 Analytics environment
 	@echo "🐍 Setting up L3 Analytics..."
 	@cd $(L3_DIR) && uv venv --python 3.13
 	@cd $(L3_DIR) && . .venv/bin/activate && uv pip install -r requirements.txt
-
 
 # =============================================================================
 # Data Pipeline — Inbound Refinery (Test Network)
@@ -162,7 +169,9 @@ run-explorer: ## Host Flecs Explorer on http://localhost:8000
 
 fmt-engine: ## Format C++ source files (requires clang-format)
 	@echo "🎨 Formatting C++ sources..."
-	@find $(L1_DIR)/src $(L1_DIR)/include -name '*.cpp' -o -name '*.hpp' | 		xargs clang-format -i -style=file 2>/dev/null || 		echo "⚠️  clang-format not installed. Run: brew install clang-format"
+	@find $(L1_DIR)/src $(L1_DIR)/include -name '*.cpp' -o -name '*.hpp' | \
+		xargs clang-format -i -style=file 2>/dev/null || \
+		echo "⚠️  clang-format not installed. Run: brew install clang-format"
 
 clean-all: clean-engine ## Clean everything (builds + Python envs)
 	@echo "🧹 Cleaning Python environments..."

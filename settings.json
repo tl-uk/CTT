@@ -3,5 +3,11 @@
     "cmake.buildDirectory": "${workspaceFolder}/services/l1-engine/build",
     "cmake.configureOnOpen": true,
     "C_Cpp.default.compileCommands": "${workspaceFolder}/services/l1-engine/build/compile_commands.json",
-    "C_Cpp.intelliSenseCacheSize": 512
+    "C_Cpp.intelliSenseCacheSize": 512,
+    
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/services/l2-bridge/.venv/lib/python3.13/site-packages",
+        "${workspaceFolder}/services/data-pipeline/fusion"
+    ],
+    "python.defaultInterpreterPath": "${workspaceFolder}/services/l2-bridge/.venv/bin/python"
 }

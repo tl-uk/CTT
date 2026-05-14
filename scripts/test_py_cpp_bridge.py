@@ -200,29 +200,14 @@ class BridgeTest:
 
     
     def extract_pressure_from_flecs(self, flecs_data):
-        """Extract adversarial_pressure from Flecs REST JSON."""
         if not flecs_data:
             return None
-            
-        # Flecs v4 REST returns components as arrays of [type, value] pairs
-        # or as objects depending on the endpoint. Inspect your actual response.
         try:
-            # Try to find MindsetComponent in the response
-            for component in flecs_data.get("components", []):
-                if isinstance(component, list) and len(component) >= 2:
-                    type_name = component[0]
-                    if "Mindset" in str(type_name) or "mindset" in str(type_name).lower():
-                        data = component[1]
-                        return data.get("adversarial_pressure", None)
-                elif isinstance(component, dict):
-                    if "mindset" in str(component.get("type", "")).lower():
-                        return component.get("data", {}).get("adversarial_pressure", None)
-        except Exception as e:
-            self.error(f"Failed to parse pressure: {e}")
-            
-        # Fallback: dump structure for debugging
-        self.log(f"Flecs response structure: {json.dumps(flecs_data, indent=2)[:500]}")
-        return None
+            components = flecs_data.get("components", {})
+            mindset = components.get("CTT.MindsetComponent", {})
+            return mindset.get("adversarial_pressure")
+        except:
+            return None
 
     def start_explorer(self):
         """Auto-start Flecs Explorer if not running."""

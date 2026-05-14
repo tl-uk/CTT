@@ -13,6 +13,7 @@ import subprocess
 import threading
 import zmq
 import requests
+from pathlib import Path
 
 # Add paths for CTT modules
 sys.path.insert(0, "services/data-pipeline/ingestor")
@@ -229,16 +230,45 @@ class BridgeTest:
             requests.get("http://localhost:8000", timeout=1)
             self.log("✅ Flecs Explorer already running")
             return True
-        except:
-            self.log("Starting Flecs Explorer...")
-            subprocess.Popen(
-                ["python3", "-m", "http.server", "8000"],
-                cwd=str(Path.home() / "explorer" / "etc"),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+        except requests.exceptions.ConnectionError:
+            pass  # Not running, need to start
+            
+        self.log("Starting Flecs Explorer...")
+        
+        explorer_dir = Path.home() / "explorer" / "etc"
+        
+        # Clone if missing
+        if not explorer_dir.exists():
+            self.log("Cloning Flecs Explorer...")
+            parent = explorer_dir.parent
+            parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                ["git", "clone", "--depth", "1", 
+                "https://github.com/flecs-hub/explorer.git", 
+                str(explorer_dir.parent)],
+                check=True
             )
-            time.sleep(2)
-            return True
+        
+        # Start server
+        subprocess.Popen(
+            ["python3", "-m", "http.server", "8000"],
+            cwd=str(explorer_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        
+        # Wait for it to be ready
+        for i in range(10):
+            time.sleep(0.5)
+            try:
+                requests.get("http://localhost:8000", timeout=1)
+                self.log("✅ Flecs Explorer started at http://localhost:8000")
+                return True
+            except:
+                continue
+                
+        self.error("Failed to start Flecs Explorer")
+        return False
         
     def run_direct_test(self):
         """Test direct perturbation to C++."""

@@ -7,7 +7,7 @@
         clean-engine setup-python setup-l3 run-dashboard clean-all \
         run-explorer run-harvester run-interpreter run-fusion \
         run-harvester-bg run-interpreter-bg run-fusion-bg \
-        test-bridge stop-pipeline fmt-engine lint-engine
+        test-bridge stop-pipeline proto proto-clean fmt-engine lint-engine
 
 # Detect CPU cores for parallel builds (macOS/Linux)
 NPROCS := $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
@@ -162,6 +162,25 @@ run-explorer: ## Host Flecs Explorer on http://localhost:8000
 	fi
 	@echo "🌐 Starting Flecs Explorer at http://localhost:8000"
 	@cd $(EXPLORER_DIR)/etc && python3 -m http.server 8000
+
+# =============================================================================
+# Protobuf Generation
+# =============================================================================
+
+PROTO_FILE := api/proto/ctt_messages.proto
+PROTO_OUT  := services/data-pipeline/fusion
+
+proto: ## Generate Python protobuf module using venv-matched protoc
+	@echo "🧬 Generating Protobuf bindings..."
+	@cd $(L2_DIR) && . .venv/bin/activate && python -m grpc_tools.protoc \
+		--python_out=../$(PROTO_OUT) \
+		-I../../api/proto \
+		../../$(PROTO_FILE)
+	@echo "✅ Generated: $(PROTO_OUT)/ctt_messages_pb2.py"
+
+proto-clean: ## Remove generated protobuf files
+	@rm -f $(PROTO_OUT)/ctt_messages_pb2.py
+	@echo "🧹 Protobuf bindings cleaned"
 
 # =============================================================================
 # Global Utilities

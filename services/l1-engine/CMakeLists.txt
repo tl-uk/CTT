@@ -24,6 +24,10 @@ include(FetchContent)
 if(APPLE AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm64")
     message(STATUS "Apple Silicon detected. Adding /opt/homebrew to search paths.")
     list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
+    # Explicitly add protobuf location for FindProtobuf
+    if(EXISTS "/opt/homebrew/opt/protobuf")
+        list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/protobuf")
+    endif()
 endif()
 
 # -----------------------------------------------------------------------------

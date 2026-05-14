@@ -49,20 +49,16 @@ def generate_non_compliant_sme_payload():
 
 
 def test_mapping_logic_direct():
-    """Tests the adapter without network I/O."""
-    print("=" * 70)
-    print("TEST 1: Direct Mapping Logic (No Network)")
-    print("=" * 70)
-    
     for i in range(5):
         raw = generate_non_compliant_sme_payload()
         mapped = sme_legacy_adapter(raw)
         
-        print(f"\n  SME Raw:")
-        print(f"    {json.dumps(raw, indent=4)}")
-        print(f"  → CTT Mapped:")
-        print(f"    uuid={mapped.uuid}, pressure={mapped.adversarial_pressure:.1f}, "
-              f"decarbonized={mapped.is_decarbonized}")
+        # Validate the output is a proper CTT_AgentState
+        assert isinstance(mapped, CTT_AgentState)
+        assert mapped.uuid == raw["truck_id"]
+        assert 0 <= mapped.adversarial_pressure <= 100
+        
+        print(f"  → CTT Mapped: uuid={mapped.uuid}, pressure={mapped.adversarial_pressure:.1f}")
 
 
 def test_zmq_feed():

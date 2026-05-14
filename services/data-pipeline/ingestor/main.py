@@ -1,5 +1,5 @@
 """
-services/data-ingestor/main.py
+services/data-pipeline/ingestor/main.py
 
 This module serves as the "Intelligent Ingestor" for the CTT ecosystem. It is responsible for receiving 
 heterogeneous data from various sources (e.g., SME Twins, external APIs), transforming it into the internal 

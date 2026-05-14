@@ -21,7 +21,7 @@ import sys
 from datetime import datetime
 
 # Adjust path to import the ingestor's adapter
-sys.path.insert(0, "services/data-ingestor")
+sys.path.insert(0, "services/data-pipeline/data-ingestor")
 try:
     from main import sme_legacy_adapter, CTT_AgentState
 except ImportError:

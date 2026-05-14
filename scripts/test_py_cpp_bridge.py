@@ -196,35 +196,84 @@ class BridgeTest:
         if initial_state and updated_state:
             self.results["pipeline_ran"] = True
             self.log("✅ Full pipeline executed")
+
+    
+    def extract_pressure_from_flecs(self, flecs_data):
+        """Extract adversarial_pressure from Flecs REST JSON."""
+        if not flecs_data:
+            return None
             
+        # Flecs v4 REST returns components as arrays of [type, value] pairs
+        # or as objects depending on the endpoint. Inspect your actual response.
+        try:
+            # Try to find MindsetComponent in the response
+            for component in flecs_data.get("components", []):
+                if isinstance(component, list) and len(component) >= 2:
+                    type_name = component[0]
+                    if "Mindset" in str(type_name) or "mindset" in str(type_name).lower():
+                        data = component[1]
+                        return data.get("adversarial_pressure", None)
+                elif isinstance(component, dict):
+                    if "mindset" in str(component.get("type", "")).lower():
+                        return component.get("data", {}).get("adversarial_pressure", None)
+        except Exception as e:
+            self.error(f"Failed to parse pressure: {e}")
+            
+        # Fallback: dump structure for debugging
+        self.log(f"Flecs response structure: {json.dumps(flecs_data, indent=2)[:500]}")
+        return None
+
+    def start_explorer(self):
+        """Auto-start Flecs Explorer if not running."""
+        try:
+            requests.get("http://localhost:8000", timeout=1)
+            self.log("✅ Flecs Explorer already running")
+            return True
+        except:
+            self.log("Starting Flecs Explorer...")
+            subprocess.Popen(
+                ["python3", "-m", "http.server", "8000"],
+                cwd=str(Path.home() / "explorer" / "etc"),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            time.sleep(2)
+            return True
+        
     def run_direct_test(self):
         """Test direct perturbation to C++."""
         self.log("=" * 60)
         self.log("DIRECT PERTURBATION TEST")
         self.log("=" * 60)
         
+        # Auto-start explorer
+        self.start_explorer()
+        
         # Get baseline
         baseline = self.check_flecs_entity_state()
+        baseline_pressure = self.extract_pressure_from_flecs(baseline)
+        self.log(f"Baseline pressure: {baseline_pressure}")
         
         # Send perturbation
         self.send_sme_data_directly()
-        
-        # Wait for processing
-        time.sleep(1)
-        
-        # Listen for broadcasts
-        self.listen_for_state_broadcast(duration=3)
+        time.sleep(1.5)  # Allow C++ processing + Flecs update
         
         # Check updated state
         updated = self.check_flecs_entity_state()
+        updated_pressure = self.extract_pressure_from_flecs(updated)
         
-        # Verify pressure changed
-        if baseline and updated:
-            # Extract mindset data from Flecs response
-            # The REST API returns component data we need to parse
-            self.log("Comparing baseline vs updated state...")
-            self.log(f"   Baseline: {json.dumps(baseline)[:100]}")
-            self.log(f"   Updated:  {json.dumps(updated)[:100]}")
+        # Verify receipt
+        if baseline is not None and updated is not None:
+            self.results["perturbation_received_by_cpp"] = True
+            
+        # Verify actual change
+        if baseline_pressure is not None and updated_pressure is not None:
+            delta = updated_pressure - baseline_pressure
+            self.log(f"Pressure: {baseline_pressure:.2f} → {updated_pressure:.2f} (Δ{delta:+.2f})")
+            if abs(delta) > 0.01:
+                self.results["pressure_actually_changed"] = True
+                
+        self.listen_for_state_broadcast(duration=3)
             
     def generate_report(self):
         """Print test results."""

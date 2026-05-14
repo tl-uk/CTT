@@ -163,6 +163,13 @@ run-explorer: ## Host Flecs Explorer on http://localhost:8000
 	@echo "🌐 Starting Flecs Explorer at http://localhost:8000"
 	@cd $(EXPLORER_DIR)/etc && python3 -m http.server 8000
 
+run-explorer-bg: ## Start Flecs Explorer in background
+	@if [ ! -d $(EXPLORER_DIR)/etc ]; then \
+		git clone --depth 1 https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); \
+	fi
+	@cd $(EXPLORER_DIR)/etc && nohup python3 -m http.server 8000 > /tmp/ctt_explorer.log 2>&1 &
+	@echo "🌐 Explorer backgrounded (log: /tmp/ctt_explorer.log)"
+	
 # =============================================================================
 # Protobuf Generation
 # =============================================================================

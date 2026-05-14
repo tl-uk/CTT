@@ -167,6 +167,9 @@ run-explorer: ## Host Flecs Explorer on http://localhost:8000
 # Protobuf Generation
 # =============================================================================
 
+PROTO_FILE := api/proto/ctt_messages.proto
+PROTO_OUT  := services/data-pipeline/fusion
+
 proto: ## Generate Python protobuf module using venv-matched protoc
 	@echo "🧬 Generating Protobuf bindings..."
 	@$(L2_DIR)/.venv/bin/python -m grpc_tools.protoc \

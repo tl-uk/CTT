@@ -49,12 +49,11 @@ void DataBridge::broadcast_state(flecs::world& world) {
 }
 
 void DataBridge::receive_perturbations(flecs::world& world) {
-    // Non-blocking poll for incoming commands
     zmq::message_t msg;
     auto result = subscriber.recv(msg, zmq::recv_flags::dontwait);
     
     if (!result || msg.size() == 0) {
-        return;  // No message waiting
+        return;
     }
 
     ctt::MindsetPerturbation p;
@@ -63,20 +62,30 @@ void DataBridge::receive_perturbations(flecs::world& world) {
         return;
     }
 
-    std::cout << "[L2 Bridge] 📥 Perturbation from " << p.source() 
-              << ": Δ" << p.pressure_delta() << " → " << p.agent_uuid() << std::endl;
+    // DEBUG: Log what we received
+    std::cout << "[L2 Bridge] 📥 RAW RECEIVED: agent=" << p.agent_uuid() 
+              << " delta=" << p.pressure_delta() 
+              << " source=" << p.source() << std::endl;
 
-    // Apply to all entities or a specific one
+    // Apply to all entities or specific one
     if (p.agent_uuid() == "all_hgv" || p.agent_uuid() == "all") {
         auto q = world.query<MindsetComponent>();
         q.each([&](flecs::entity e, MindsetComponent& m) {
+            std::cout << "[L2 Bridge] 🔄 BEFORE: " << e.name() 
+                      << " pressure=" << m.adversarial_pressure << std::endl;
             m.adversarial_pressure += p.pressure_delta();
+            std::cout << "[L2 Bridge] ✅ AFTER: " << e.name() 
+                      << " pressure=" << m.adversarial_pressure << std::endl;
         });
     } else {
         auto e = world.lookup(p.agent_uuid().c_str());
         if (e.is_alive()) {
             auto& m = e.get_mut<MindsetComponent>();
+            std::cout << "[L2 Bridge] 🔄 BEFORE: " << e.name() 
+                      << " pressure=" << m.adversarial_pressure << std::endl;
             m.adversarial_pressure += p.pressure_delta();
+            std::cout << "[L2 Bridge] ✅ AFTER: " << e.name() 
+                      << " pressure=" << m.adversarial_pressure << std::endl;
         } else {
             std::cerr << "[L2 Bridge] ⚠️  Entity not found: " << p.agent_uuid() << std::endl;
         }

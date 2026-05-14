@@ -18,7 +18,7 @@ import os
 # Generated protobuf module
 sys.path.insert(0, os.path.dirname(__file__))
 try:
-    from ctt_messages_pb2 import MindsetPerturbation
+    from ctt_messages_pb2 import MindsetPerturbation # type: ignore
 except ImportError:
     print("❌ ctt_messages_pb2.py not found. Run: protoc --python_out=. api/proto/ctt_messages.proto")
     raise

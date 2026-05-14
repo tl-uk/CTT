@@ -75,10 +75,8 @@ void DataBridge::receive_perturbations(flecs::world& world) {
     } else {
         auto e = world.lookup(p.agent_uuid().c_str());
         if (e.is_alive()) {
-            auto* m = e.try_get<MindsetComponent>();
-            if (m) {
-                m->adversarial_pressure += p.pressure_delta();
-            }
+            auto& m = e.get_mut<MindsetComponent>();
+            m.adversarial_pressure += p.pressure_delta();
         } else {
             std::cerr << "[L2 Bridge] ⚠️  Entity not found: " << p.agent_uuid() << std::endl;
         }

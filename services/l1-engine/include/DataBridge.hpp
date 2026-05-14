@@ -14,7 +14,7 @@ namespace CTT {
     public:
         /**
          * @brief Initializes ZMQ pub (telemetry out) and sub (commands in).
-         * @param pub_address  Bind address for state broadcasts, e.g. "tcp://*:5555".
+         * * @param pub_address  Bind address for state broadcasts. Example: tcp://*:5555
          * @param sub_address  Connect address for perturbations, e.g. "tcp://localhost:5556".
          */
         DataBridge(const std::string& pub_address, const std::string& sub_address);

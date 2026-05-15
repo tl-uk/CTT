@@ -1,38 +1,83 @@
 """
 services/data-pipeline/interpreter/semantic_agent.py
 
-This module implements a "Semantic Interpreter" agent that subscribes to raw data from the harvester 
-(e.g., route delays) and transforms it into a format that can be understood by the C++ Simulation Engine. 
-The interpreter applies semantic mapping rules to convert domain-specific information (like "route delay") 
-into actionable insights (like "pressure increase on HGV category"). This allows the CTT ecosystem to react 
-to real-world events in a meaningful way, bridging the gap between raw data and simulation inputs.
-
+Semantic Interpreter: Maps raw harvester data to CTT Mindset perturbations.
+Handles both SME format (efficiency_score) and GTFS format (impact/delay_minutes).
 """
+import zmq
+import json
+import sys
+import os
 
-import zmq, json
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "config"))
+from ports import ZMQ_PORTS
+
+def calculate_pressure(raw_data: dict) -> float:
+    """
+    Convert raw data to adversarial pressure (0-100 scale).
+
+    Priority:
+      1. efficiency_score (SME direct feed)
+      2. delay_minutes / impact (GTFS-style delay)
+      3. Default: 50.0
+    """
+    if "efficiency_score" in raw_data:
+        # Lower efficiency = higher pressure
+        score = float(raw_data["efficiency_score"])
+        return round((1.0 - score) * 100, 1)
+
+    if "impact" in raw_data:
+        # Legacy harvester format: impact is already a pressure proxy
+        return float(raw_data["impact"])
+
+    if "delay_minutes" in raw_data:
+        # GTFS-style: 1 minute delay ≈ 1.5 pressure units
+        return min(100.0, float(raw_data["delay_minutes"]) * 1.5)
+
+    return 50.0
 
 def run_semantic_interpreter():
     context = zmq.Context()
-    sub = context.socket(zmq.SUB)
-    sub.connect("tcp://localhost:5560")
-    sub.setsockopt_string(zmq.SUBSCRIBE, "")
-    
-    pub = context.socket(zmq.PUB)
-    pub.bind("tcp://*:5561")
 
-    print("🧠 Semantic Agent: Mapping SME data to CTT Mindset logic...")
+    # Input: raw data from Harvester
+    sub = context.socket(zmq.SUB)
+    sub.connect(ZMQ_PORTS["HARVESTER_SUB"])
+    sub.setsockopt_string(zmq.SUBSCRIBE, "")
+
+    # Output: interpreted data to Fusion
+    pub = context.socket(zmq.PUB)
+    pub.bind(ZMQ_PORTS["INTERPRETER_PUB"])
+
+    print("🧠 Semantic Interpreter Online")
+    print(f"   Input:  {ZMQ_PORTS['HARVESTER_SUB']}")
+    print(f"   Output: {ZMQ_PORTS['INTERPRETER_PUB']}")
+    print("   Logic:  pressure = (1.0 - efficiency) * 100  |  or delay * 1.5")
+
+    # Slow-joiner guard
+    time.sleep(0.5)
 
     while True:
-        raw = json.loads(sub.recv_string())
-        
-        # Mapping Logic: (1.0 - efficiency) * 100 = pressure
-        pressure_calc = (1.0 - raw.get("efficiency_score", 0.5)) * 100
-        
+        try:
+            raw = json.loads(sub.recv_string())
+        except json.JSONDecodeError as e:
+            print(f"   ⚠️  Malformed JSON: {e}")
+            continue
+
+        truck_id = raw.get("truck_id", "all_hgv")
+        pressure = calculate_pressure(raw)
+
         interpreted = {
-            "agent_uuid": raw.get("truck_id"),
-            "pressure_delta": pressure_calc
+            "agent_uuid": truck_id,
+            "pressure_delta": pressure,
+            "source": raw.get("source", "unknown"),
+            "route": raw.get("route", "unknown"),
+            "raw_efficiency": raw.get("efficiency_score"),
+            "raw_delay": raw.get("delay_minutes")
         }
+
         pub.send_string(json.dumps(interpreted))
+        print(f"   → {truck_id:20s} | pressure={pressure:5.1f} | route={interpreted['route']}")
 
 if __name__ == "__main__":
+    import time  # imported here for startup guard
     run_semantic_interpreter()

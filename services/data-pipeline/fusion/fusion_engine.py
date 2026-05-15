@@ -1,57 +1,67 @@
 """
 services/data-pipeline/fusion/fusion_engine.py
 
-This module implements a "Fusion Engine" that subscribes to interpreted data from the Semantic Interpreter 
-and applies multi-source fusion logic to generate perturbations that can be sent to the L1 Engine. The Fusion 
-Engine acts as a central hub for combining insights from various data sources (e.g., route delays, weather 
-conditions, social media sentiment) and translating them into actionable commands for the simulation. 
-This allows the CTT ecosystem to react to complex, real-world scenarios in a more holistic way, enhancing the 
-realism and responsiveness of the simulation.
+Fusion Engine: Subscribes to interpreted data, serializes Protobuf perturbations,
+and broadcasts to the C++ L1 Engine.
 
-Fusion Engine: subscribes to interpreted data and sends Protobuf perturbations
-directly to the C++ L1 Engine.
+CRITICAL FIX: This module BINDS a PUB socket on port 5556.
+The C++ engine SUB connects to this address.
 """
 import zmq
 import sys
 import os
+import json
+import time
 
-# Generated protobuf module
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "config"))
+from ports import ZMQ_PORTS
+
+# Protobuf import
 try:
-    from ctt_messages_pb2 import MindsetPerturbation # type: ignore
+    from ctt_messages_pb2 import MindsetPerturbation #type: ignore
 except ImportError:
-    print("❌ ctt_messages_pb2.py not found. Run: protoc --python_out=. api/proto/ctt_messages.proto")
+    print("❌ ctt_messages_pb2.py not found. Run: make proto")
     raise
 
 def run_fusion():
     context = zmq.Context()
-    
+
     # Input: interpreted data from Semantic Agent
     sub = context.socket(zmq.SUB)
-    sub.connect("tcp://localhost:5561")
+    sub.connect(ZMQ_PORTS["INTERPRETER_SUB"])
     sub.setsockopt_string(zmq.SUBSCRIBE, "")
-    
+
     # Output: Protobuf perturbations to L1 Engine
+    # FIX: We BIND here because C++ SUB connects to us.
     l1_control = context.socket(zmq.PUB)
-    l1_control.connect("tcp://localhost:5556")
+    l1_control.bind(ZMQ_PORTS["L1_PERTURBATION_PUB"])
 
     print("⚡ Fusion Engine Online (Protobuf mode)")
-    print("   Input:  tcp://localhost:5561")
-    print("   Output: tcp://localhost:5556")
+    print(f"   Input:  {ZMQ_PORTS['INTERPRETER_SUB']}")
+    print(f"   Output: {ZMQ_PORTS['L1_PERTURBATION_PUB']}  ← BIND (C++ connects here)")
+
+    # Slow-joiner guard
+    time.sleep(0.5)
 
     while True:
-        raw_json = sub.recv_string()
-        import json
-        data = json.loads(raw_json)
-        
+        try:
+            raw_json = sub.recv_string()
+            data = json.loads(raw_json)
+        except (json.JSONDecodeError, zmq.ZMQError) as e:
+            print(f"   ⚠️  Receive error: {e}")
+            continue
+
         # Build Protobuf message
         p = MindsetPerturbation()
         p.agent_uuid = data.get("agent_uuid", "all_hgv")
-        p.pressure_delta = data.get("pressure_delta", 0.0)
-        p.source = "Semantic_Interpreter_v1"
-        
+        p.pressure_delta = float(data.get("pressure_delta", 0.0))
+        p.source = data.get("source", "fusion_engine")
+
         # Serialize and send as binary
-        l1_control.send(p.SerializeToString())
+        serialized = p.SerializeToString()
+        l1_control.send(serialized)
+
+        print(f"   → Protobuf sent | agent={p.agent_uuid} | delta={p.pressure_delta:.1f} | bytes={len(serialized)}")
 
 if __name__ == "__main__":
     run_fusion()

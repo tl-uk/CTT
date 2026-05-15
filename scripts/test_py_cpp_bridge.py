@@ -335,7 +335,7 @@ class BridgeTest:
             # MarketPressureSystem adds 1.2 * delta_time per tick (~0.1s sleep = ~0.12 per tick)
             # After 2 seconds, that's roughly 10.0 + (1.2 * 2) = 12.4
             # Use a generous threshold to account for timing variance
-            if delta > 5.0:
+            if delta > 2.0: # was 5.0
                 self.results["pressure_actually_changed"] = True
                 self.log("✅ Pressure significantly increased")
             else:

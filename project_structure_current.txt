@@ -1,0 +1,4 @@
+./scripts/test_py_cpp_bridge.py
+./scripts/test_sme_feed.py
+./services/l1-engine/CMakeLists.txt
+./services/l2-bridge/dashboard.py

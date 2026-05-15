@@ -25,9 +25,19 @@ DataBridge::DataBridge(const std::string& pub_address, const std::string& sub_ad
 void DataBridge::broadcast_state(flecs::world& world) {
     json payload = json::array();
 
-    auto q = world.query<const TaxonomyComponent, const EnergyComponent, const PositionComponent>();
+    auto q = world.query<
+        const TaxonomyComponent, 
+        const EnergyComponent, 
+        const PositionComponent,
+        const MindsetComponent
+    >();
 
-    q.each([&](flecs::entity e, const TaxonomyComponent& tax, const EnergyComponent& energy, const PositionComponent& pos) {
+    q.each([&](flecs::entity e, 
+               const TaxonomyComponent& tax, 
+               const EnergyComponent& energy, 
+               const PositionComponent& pos,
+               const MindsetComponent& mindset) {
+        
         float energy_pct = 0.0f;
         if (energy.maxEnergyStorage > 0.0f) {
             energy_pct = (energy.currentEnergyStorage / energy.maxEnergyStorage) * 100.0f;
@@ -39,9 +49,16 @@ void DataBridge::broadcast_state(flecs::world& world) {
             {"powertrain", static_cast<int>(energy.engineType)},
             {"energy_pct", energy_pct},
             {"lat", pos.latitude},
-            {"lon", pos.longitude}
+            {"lon", pos.longitude},
+            {"adversarial_pressure", mindset.adversarial_pressure},
+            {"is_decarbonized", mindset.is_decarbonized}
         });
     });
+
+    std::string message_string = payload.dump();
+    zmq::message_t message(message_string.data(), message_string.size());
+    publisher.send(message, zmq::send_flags::none);
+}
 
     std::string message_string = payload.dump();
     zmq::message_t message(message_string.data(), message_string.size());

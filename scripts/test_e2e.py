@@ -32,9 +32,9 @@ from ports import ZMQ_PORTS
 
 # Test payloads — must match what interpreter expects
 TEST_PAYLOADS = [
-    {"truck_id": "SME_Volvo_01", "fuel_type": "Diesel", "efficiency_score": 0.69, "route": "Test_Route_A", "source": "e2e_test"},
-    {"truck_id": "Haulier_T-100", "fuel_type": "Diesel", "efficiency_score": 0.42, "route": "Test_Route_B", "source": "e2e_test"},
-    {"truck_id": "SME_Volvo_01", "fuel_type": "Diesel", "efficiency_score": 0.15, "route": "Test_Route_C", "source": "e2e_test"},
+    {"truck_id": "Volvo_eHGV_001", "fuel_type": "Diesel", "efficiency_score": 0.69, "route": "Test_Route_A", "source": "e2e_test"},
+    {"truck_id": "all_hgv", "fuel_type": "Diesel", "efficiency_score": 0.42, "route": "Test_Route_B", "source": "e2e_test"},
+    {"truck_id": "Volvo_eHGV_001", "fuel_type": "Diesel", "efficiency_score": 0.15, "route": "Test_Route_C", "source": "e2e_test"},
 ]
 
 def wait_for_port(port: int, timeout: float = 5.0, host: str = "localhost") -> bool:

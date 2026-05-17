@@ -183,14 +183,24 @@ class BodsClient:
 # BAT API Client — Buses & Trains (UK JSON API)
 # ---------------------------------------------------------------------------
 class BatClient:
+    """
+    Buses & Trains API client.
+    Auth: Authorization: Bearer <api_key>
+    The API key should include the 'bat_' prefix if your account provides it that way.
+    """
     def __init__(self, api_key: str, base_url: str = "https://api.busesandtrains.co.uk"):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
+        # Ensure the key has the bat_ prefix
+        self._bearer_token = api_key if api_key.startswith("bat_") else f"bat_{api_key}"
         self.session.headers.update({
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {self._bearer_token}",
             "Accept": "application/json",
         })
+        # Debug: show key prefix (never log full key)
+        key_preview = self._bearer_token[:12] + "..." if len(self._bearer_token) > 12 else self._bearer_token
+        print(f"   🔑 Auth: Bearer {key_preview}")
 
     @with_retries(max_attempts=2, backoff_base=1.5)
     def search_stops(self, lat: float, lon: float, radius: int = 2000, limit: int = 10) -> list[dict]:
@@ -479,14 +489,9 @@ def run_gtfs_harvester(mode: str = "mock"):
     print(f"   Binding: {bind_addr}")
     print(f"   Poll interval: {config.HARVESTER_POLL_INTERVAL}s")
 
-    # Mode-specific client initialization — each branch creates a NARROWED local variable
-    # Pylance can now infer the exact type within each branch
     parser: Optional[GtfsStaticParser] = None
 
     if mode == "transitland":
-        # ------------------------------------------------------------------
-        # Transitland mode: discover/download static feeds, parse headways
-        # ------------------------------------------------------------------
         tl_client = TransitlandClient(api_key=config.TRANSITLAND_API_KEY, base_url=config.TRANSITLAND_BASE_URL)
         print(f"   Backend: Transitland ({config.TRANSITLAND_BASE_URL})")
         dl_dir = Path(__file__).parent.parent.parent.parent / "data" / "gtfs"
@@ -548,7 +553,6 @@ def run_gtfs_harvester(mode: str = "mock"):
                         if summary:
                             print(f"   📊 Feed summary: {summary}")
 
-        # Transitland main loop — uses parser, not a client
         cycle = 0
         try:
             while True:
@@ -576,12 +580,9 @@ def run_gtfs_harvester(mode: str = "mock"):
         finally:
             pub.close()
             context.term()
-        return  # <-- Exit early; other modes handled below
+        return
 
     elif mode == "bods":
-        # ------------------------------------------------------------------
-        # BODS mode: GTFS-RT protobuf feed
-        # ------------------------------------------------------------------
         bods_client = BodsClient(api_key=config.BODS_API_KEY, base_url=config.BODS_BASE_URL)
         print(f"   Backend: BODS ({config.BODS_BASE_URL})")
         print(f"   Coverage: UK-wide bus (England, Scotland, Wales)")
@@ -663,9 +664,6 @@ def run_gtfs_harvester(mode: str = "mock"):
         return
 
     elif mode == "tfl":
-        # ------------------------------------------------------------------
-        # TfL mode: London line status
-        # ------------------------------------------------------------------
         tfl_client = TflClient(base_url=config.TFL_BASE_URL)
         print(f"   Backend: TfL ({config.TFL_BASE_URL})")
         print(f"   Coverage: London only (bus, tube, DLR, Overground, Tram)")
@@ -702,9 +700,6 @@ def run_gtfs_harvester(mode: str = "mock"):
         return
 
     elif mode == "gtfs":
-        # ------------------------------------------------------------------
-        # Generic GTFS-RT mode
-        # ------------------------------------------------------------------
         gtfs_client = GtfsRtClient(feed_url=config.GTFS_RT_FEED_URL)
         print(f"   Backend: Direct GTFS-RT ({config.GTFS_RT_FEED_URL})")
 

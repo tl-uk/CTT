@@ -19,16 +19,14 @@ print(f"Last 5 chars: '{raw_key[-5:]}'")
 # Now try importing via settings
 sys.path.insert(0, str(PROJECT_ROOT / "services" / "config"))
 from settings import config
-print(f"
-From settings module:")
+print(f"\nFrom settings module:")
 print(f"  BAT_API_KEY length: {len(config.BAT_API_KEY)}")
 print(f"  BAT_BASE_URL: {config.BAT_BASE_URL}")
 
 # Test a simple ping
 import requests
 headers = {"Authorization": f"Bearer {config.BAT_API_KEY}"}
-print(f"
-Testing /v1/stops?q=Cardiff (timeout=15s)...")
+print(f"\nTesting /v1/stops?q=Cardiff (timeout=15s)...")
 try:
     resp = requests.get(f"{config.BAT_BASE_URL}/v1/stops", headers=headers, params={"q": "Cardiff", "limit": 1}, timeout=15)
     print(f"  Status: {resp.status_code}")

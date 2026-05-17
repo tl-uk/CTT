@@ -34,3 +34,6 @@ data/processed/
 # --- Docker ---
 deploy/*.env
 !deploy/.env.example
+
+# --- local data folders ---
+data/

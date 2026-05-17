@@ -2,22 +2,19 @@
 services/config/settings.py
 
 Typed configuration loader for CTT.
+Reads from .env file in project root.
 """
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
 # Load .env from project root (CTT/.env)
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+# Use resolve() to eliminate '..' and symlinks, then walk up to project root
+_settings_file = Path(__file__).resolve()  # absolute, no symlinks, no ..
+PROJECT_ROOT = _settings_file.parent.parent.parent  # CTT/services/config/ → CTT/
 env_path = PROJECT_ROOT / ".env"
 
-# DEBUG: log what we're doing
-print(f"[settings.py] PROJECT_ROOT: {PROJECT_ROOT}")
-print(f"[settings.py] Looking for .env at: {env_path}")
-print(f"[settings.py] .env exists: {env_path.exists()}")
-
-loaded = load_dotenv(env_path)
-print(f"[settings.py] load_dotenv returned: {loaded}")
+load_dotenv(env_path)
 
 class CTTConfig:
     """Typed configuration with validation."""
@@ -62,4 +59,3 @@ class CTTConfig:
         return errors
 
 config = CTTConfig()
-print(f"[settings.py] BAT_API_KEY loaded: {bool(config.BAT_API_KEY)} (length: {len(config.BAT_API_KEY)})")

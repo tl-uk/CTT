@@ -28,7 +28,7 @@ def main():
     parser = argparse.ArgumentParser(description="CTT Data Harvester")
     parser.add_argument(
         "--mode",
-        choices=["mock", "gtfs", "transitland"],
+        choices=["mock", "gtfs", "transitland", "bods", "tfl"],
         default=config.HARVESTER_MODE,
         help="Harvesting backend to use"
     )

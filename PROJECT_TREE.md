@@ -1,25 +1,35 @@
 # CTT Project Structure
 
-**Generated:** Fri May 15 17:12:57 BST 2026
+**Generated:** Sun May 17 18:20:14 BST 2026
 
 ```
 └── CTT
+    ├── .env
     ├── Makefile
+    ├── PROJECT_TREE.md
     ├── api
     │   └── proto
     │       └── ctt_messages.proto
     ├── scripts
     │   ├── generate_project_tree.py
+    │   ├── test_e2e.py
     │   ├── test_py_cpp_bridge.py
     │   └── test_sme_feed.py
     └── services
+        ├── config
+        │   ├── ports.py
+        │   ├── settings.py
+        │   └── validate_ports.py
         ├── data-pipeline
         │   ├── fusion
         │   │   ├── __init__.py
         │   │   ├── ctt_messages_pb2.py
         │   │   └── fusion_engine.py
         │   ├── ingestor
+        │   │   ├── gtfs_harvester.py
+        │   │   ├── gtfs_loader.py
         │   │   ├── harvester.py
+        │   │   ├── harvester_mock.py
         │   │   └── main.py
         │   └── interpreter
         │       └── semantic_agent.py
@@ -28,6 +38,7 @@
         │   ├── include
         │   │   ├── AgentComponents.hpp
         │   │   ├── DataBridge.hpp
+        │   │   ├── PortConfig.hpp
         │   │   └── SimulationEngine.hpp
         │   └── src
         │       ├── DataBridge.cpp

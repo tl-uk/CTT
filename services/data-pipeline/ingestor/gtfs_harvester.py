@@ -111,6 +111,13 @@ class TransitlandClient:
                 f.write(chunk)
         return output_path
 
+    def is_uk_feed(self, feed: dict) -> bool:
+        """Check if a feed is UK-based by onestop_id or name."""
+        feed_id = feed.get("onestop_id", "").lower()
+        name = feed.get("name", "").lower()
+        uk_patterns = ["dft", "tfl", "stagecoach", " arriva", "firstbus", "gov~uk", "nationalrail", "scotrail"]
+        return any(p in feed_id or p in name for p in uk_patterns)
+
 # ---------------------------------------------------------------------------
 # BODS API Client — UK Real-Time Bus (GTFS-RT Protobuf)
 # ---------------------------------------------------------------------------
@@ -121,19 +128,20 @@ class BodsClient:
     BODS publishes live vehicle positions and trip updates in GTFS-RT format
     for all bus operators in England, Scotland, and Wales.
 
+    The GTFS-RT endpoint is: https://data.bus-data.dft.gov.uk/api/v1/gtfsrt/
+    Requires x-api-key header and Accept: application/octet-stream.
+
     Register: https://data.bus-data.dft.gov.uk
     Docs: https://www.bus-data.dft.gov.uk/api_documentation/
-
-    Use this mode for:
-      • Live bus service disruptions
-      • Real-time vehicle positions
-      • Current network state (not historical)
     """
     def __init__(self, api_key: str, base_url: str = "https://data.bus-data.dft.gov.uk/api/v1"):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
-        self.session.headers.update({"x-api-key": api_key})
+        self.session.headers.update({
+            "x-api-key": api_key,
+            "Accept": "application/octet-stream",
+        })
 
     @with_retries(max_attempts=3, backoff_base=2.0)
     def fetch_trip_updates(self) -> list[dict]:
@@ -259,13 +267,14 @@ class TflClient:
                 reason = status.get("statusSeverityDescription", "")
                 severity = status.get("statusSeverity", 10)
 
-                # Only report actual disruptions (severity < 10 = Good Service)
-                if severity >= 10:
+                # Only report actual disruptions (severity < 9)
+                # Severity 9 = Minor Delays (too noisy), 10 = Good Service
+                if severity >= 9:
                     continue
 
                 # Map severity to synthetic delay minutes
-                # 9 = Minor delays (~5min), 6 = Severe (~20min), 0 = Suspended (60min)
-                delay_map = {9: 5, 8: 8, 7: 12, 6: 20, 5: 30, 4: 40, 3: 50, 2: 55, 1: 60, 0: 60}
+                # 8 = Reduced Service (~8min), 6 = Severe (~20min), 0 = Suspended (60min)
+                delay_map = {8: 8, 7: 12, 6: 20, 5: 30, 4: 40, 3: 50, 2: 55, 1: 60, 0: 60}
                 delay_min = delay_map.get(severity, 10)
 
                 delays.append({
@@ -444,8 +453,8 @@ def run_gtfs_harvester(mode: str = "mock"):
     fleet_pool = [
         {"truck_id": "SME_Volvo_01", "fuel_type": "Diesel", "base_efficiency": 0.72},
         {"truck_id": "Haulier_T-100", "fuel_type": "Diesel", "base_efficiency": 0.65},
+        {"truck_id": "Unregistered_HGV_X7", "fuel_type": "Diesel", "base_efficiency": 0.58},
         {"truck_id": "GreenFleet_BEV_09", "fuel_type": "Electric", "base_efficiency": 0.91},
-        {"truck_id": "CTT_HGV_001", "fuel_type": "Diesel", "base_efficiency": 0.68},
     ]
 
     print(f"📡 GTFS Harvester Online | Mode: {mode.upper()}")
@@ -460,62 +469,84 @@ def run_gtfs_harvester(mode: str = "mock"):
         client = TransitlandClient(api_key=config.TRANSITLAND_API_KEY, base_url=config.TRANSITLAND_BASE_URL)
         print(f"   Backend: Transitland ({config.TRANSITLAND_BASE_URL})")
 
-        bbox_str = None
-        if config.GTFS_BBOX:
-            parts = config.GTFS_BBOX.split(",")
-            if len(parts) == 4:
-                try:
-                    a, b, c, d = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])
-                    if a > 20 and b > -20 and b < 20:
-                        bbox_str = f"{b},{a},{d},{c}"
-                    else:
-                        bbox_str = config.GTFS_BBOX
-                except ValueError:
-                    bbox_str = config.GTFS_BBOX
+        # --- CHECK FOR CACHED UK FEED FIRST ---
+        dl_dir = Path(__file__).parent.parent.parent.parent / "data" / "gtfs"
+        dl_dir.mkdir(parents=True, exist_ok=True)
 
-        try:
-            feeds = client.get_feeds(bbox=bbox_str)
-            print(f"   Discovered {len(feeds)} feed(s)")
-            for f in feeds[:5]:
-                print(f"      • {f.get('onestop_id', 'unknown')} — {f.get('name', 'unnamed')}")
-        except Exception as e:
-            print(f"   ⚠️  Feed discovery failed: {e}")
-            feeds = []
-
-        if feeds:
-            feed = feeds[0]
-            feed_id = feed.get("onestop_id")
-            if feed_id:
-                dl_dir = Path(__file__).parent.parent.parent.parent / "data" / "gtfs"
-                dl_dir.mkdir(parents=True, exist_ok=True)
-                downloaded_feed_path = dl_dir / f"{feed_id}.zip"
-
-                if downloaded_feed_path.exists():
-                    print(f"   Using cached feed: {downloaded_feed_path}")
-                else:
-                    print(f"   Downloading feed {feed_id}...")
+        # Look for existing UK BODS feed
+        cached_feeds = list(dl_dir.glob("f-bus~dft~gov~uk*.zip"))
+        if cached_feeds:
+            cached_feed = cached_feeds[0]
+            print(f"   ✅ Using cached UK feed: {cached_feed.name}")
+            parser = GtfsStaticParser(
+                feed_path=cached_feed,
+                service_date=None,
+                bbox=None,
+            )
+            summary = parser.get_summary()
+            if summary:
+                print(f"   📊 Feed summary: {summary}")
+        else:
+            # No cached feed - discover via API
+            bbox_str = None
+            if config.GTFS_BBOX:
+                parts = config.GTFS_BBOX.split(",")
+                if len(parts) == 4:
                     try:
-                        client.download_latest_feed(feed_id, downloaded_feed_path)
-                        print(f"   ✅ Downloaded to {downloaded_feed_path}")
-                    except Exception as e:
-                        print(f"   ❌ Download failed: {e}")
-                        downloaded_feed_path = None
+                        a, b, c, d = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])
+                        # Convert from lat-first to lon-first format
+                        if a > 20 and b > -20 and b < 20:
+                            bbox_str = f"{b},{a},{d},{c}"
+                        else:
+                            bbox_str = config.GTFS_BBOX
+                    except ValueError:
+                        bbox_str = config.GTFS_BBOX
 
-                if downloaded_feed_path and downloaded_feed_path.exists():
-                    bbox_tuple = None
-                    if config.GTFS_BBOX:
-                        parts = [float(p) for p in config.GTFS_BBOX.split(",")]
-                        if len(parts) == 4:
-                            bbox_tuple = (parts[1], parts[0], parts[3], parts[2])
+            try:
+                feeds = client.get_feeds(bbox=bbox_str)
+                # Filter for UK feeds
+                uk_feeds = [f for f in feeds if client.is_uk_feed(f)]
+                feeds_to_use = uk_feeds if uk_feeds else feeds
 
-                    parser = GtfsStaticParser(
-                        feed_path=downloaded_feed_path,
-                        service_date=None,
-                        bbox=bbox_tuple,
-                    )
-                    summary = parser.get_summary()
-                    if summary:
-                        print(f"   📊 Feed summary: {summary}")
+                print(f"   Discovered {len(feeds_to_use)} feed(s)")
+                for f in feeds_to_use[:5]:
+                    print(f"      • {f.get('onestop_id', 'unknown')} — {f.get('name', 'unnamed')}")
+            except Exception as e:
+                print(f"   ⚠️  Feed discovery failed: {e}")
+                feeds_to_use = []
+
+            if feeds_to_use:
+                feed = feeds_to_use[0]
+                feed_id = feed.get("onestop_id")
+                if feed_id:
+                    downloaded_feed_path = dl_dir / f"{feed_id}.zip"
+
+                    if downloaded_feed_path.exists():
+                        print(f"   Using cached feed: {downloaded_feed_path}")
+                    else:
+                        print(f"   Downloading feed {feed_id}...")
+                        try:
+                            client.download_latest_feed(feed_id, downloaded_feed_path)
+                            print(f"   ✅ Downloaded to {downloaded_feed_path}")
+                        except Exception as e:
+                            print(f"   ❌ Download failed: {e}")
+                            downloaded_feed_path = None
+
+                    if downloaded_feed_path and downloaded_feed_path.exists():
+                        bbox_tuple = None
+                        if config.GTFS_BBOX:
+                            parts = [float(p) for p in config.GTFS_BBOX.split(",")]
+                            if len(parts) == 4:
+                                bbox_tuple = (parts[1], parts[0], parts[3], parts[2])
+
+                        parser = GtfsStaticParser(
+                            feed_path=downloaded_feed_path,
+                            service_date=None,
+                            bbox=bbox_tuple,
+                        )
+                        summary = parser.get_summary()
+                        if summary:
+                            print(f"   📊 Feed summary: {summary}")
 
     elif mode == "bods":
         client = BodsClient(api_key=config.BODS_API_KEY, base_url=config.BODS_BASE_URL)

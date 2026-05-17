@@ -34,6 +34,12 @@ class CTTConfig:
     BODS_API_KEY = os.getenv("BODS_API_KEY", "")
     BODS_BASE_URL = os.getenv("BODS_BASE_URL", "https://data.bus-data.dft.gov.uk/api/v1")
 
+    # BAT (Buses & Trains API)
+    BAT_API_KEY = os.getenv("BAT_API_KEY", "")
+    BAT_BASE_URL = os.getenv("BAT_BASE_URL", "https://api.busesandtrains.co.uk")
+    BAT_BUS_STOPS = os.getenv("BAT_BUS_STOPS", "")       # Comma-separated ATCO codes
+    BAT_RAIL_STATIONS = os.getenv("BAT_RAIL_STATIONS", "") # Comma-separated CRS codes
+
     # TfL
     TFL_BASE_URL = os.getenv("TFL_BASE_URL", "https://api.tfl.gov.uk")
 
@@ -54,6 +60,9 @@ class CTTConfig:
 
         if self.HARVESTER_MODE == "bods" and not self.BODS_API_KEY:
             errors.append("BODS_API_KEY is required for bods mode")
+
+        if self.HARVESTER_MODE == "bat" and not self.BAT_API_KEY:
+            errors.append("BAT_API_KEY is required for bat mode")
 
         if self.HARVESTER_MODE == "gtfs" and not self.GTFS_RT_FEED_URL:
             errors.append("GTFS_RT_FEED_URL is required for gtfs mode")

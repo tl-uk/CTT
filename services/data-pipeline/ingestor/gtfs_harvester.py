@@ -7,7 +7,8 @@ Modes:
   mock        — Simulated SME data (development / CI)
   transitland — Download GTFS static feeds for offline simulation
   gtfs        — Generic direct GTFS-RT protobuf feed
-  bods        — UK Bus Open Data Service (real-time bus, requires API key)
+  bods        — UK Bus Open Data Service (real-time bus, requires BODS_API_KEY)
+  bat         — Buses & Trains API (UK bus/rail JSON, requires BAT_API_KEY)
   tfl         — Transport for London JSON API (no key, London only)
 
 All modes normalize to CTT internal schema and publish to ZMQ port 5560.
@@ -56,12 +57,6 @@ def with_retries(max_attempts: int = 3, backoff_base: float = 1.5):
 class TransitlandClient:
     """
     Transitland v2 REST API client for GTFS static feed discovery and download.
-
-    Use this mode for:
-      • Offline simulation with historical schedules
-      • Feed archiving and version control
-      • Testing with known-good static data
-      • Rail and ferry networks (where real-time is limited)
     """
     def __init__(self, api_key: str, base_url: str = "https://transit.land/api/v2"):
         self.api_key = api_key
@@ -90,7 +85,6 @@ class TransitlandClient:
         resp = self.session.get(url, timeout=120, stream=True)
 
         if resp.status_code == 404:
-            # Fallback: get URL from feed_versions
             versions_url = f"{self.base_url}/rest/feed_versions"
             v_resp = self.session.get(versions_url, params={"feed_onestop_id": feed_onestop_id, "limit": 1}, timeout=15)
             v_resp.raise_for_status()
@@ -124,15 +118,7 @@ class TransitlandClient:
 class BodsClient:
     """
     Bus Open Data Service (BODS) client for UK-wide real-time bus data.
-
-    BODS publishes live vehicle positions and trip updates in GTFS-RT format
-    for all bus operators in England, Scotland, and Wales.
-
-    The GTFS-RT endpoint is: https://data.bus-data.dft.gov.uk/api/v1/gtfsrt/
-    Requires x-api-key header and Accept: application/octet-stream.
-
-    Register: https://data.bus-data.dft.gov.uk
-    Docs: https://www.bus-data.dft.gov.uk/api_documentation/
+    Endpoint: https://data.bus-data.dft.gov.uk/api/v1/gtfsrt/
     """
     def __init__(self, api_key: str, base_url: str = "https://data.bus-data.dft.gov.uk/api/v1"):
         self.api_key = api_key
@@ -160,7 +146,6 @@ class BodsClient:
         return self._parse_vehicle_protobuf(resp.content)
 
     def _parse_protobuf(self, data: bytes) -> list[dict]:
-        """Parse GTFS-RT TripUpdates protobuf."""
         try:
             from google.transit import gtfs_realtime_pb2
             feed = gtfs_realtime_pb2.FeedMessage()
@@ -170,20 +155,16 @@ class BodsClient:
             for entity in feed.entity:
                 if not entity.HasField("trip_update"):
                     continue
-
                 tu = entity.trip_update
                 route_id = tu.trip.route_id
-
                 for stop_time in tu.stop_time_update:
                     delay_sec = 0
                     if stop_time.HasField("departure"):
                         delay_sec = stop_time.departure.delay
                     elif stop_time.HasField("arrival"):
                         delay_sec = stop_time.arrival.delay
-
                     if delay_sec <= 0:
                         continue
-
                     delays.append({
                         "route_id": route_id,
                         "delay_seconds": delay_sec,
@@ -192,7 +173,6 @@ class BodsClient:
                         "source": "bods_tripupdate"
                     })
             return delays
-
         except ImportError:
             print("   ⚠️  google.transit not installed. Run: pip install gtfs-realtime-bindings")
             return []
@@ -201,17 +181,14 @@ class BodsClient:
             return []
 
     def _parse_vehicle_protobuf(self, data: bytes) -> list[dict]:
-        """Parse GTFS-RT VehiclePositions protobuf."""
         try:
             from google.transit import gtfs_realtime_pb2
             feed = gtfs_realtime_pb2.FeedMessage()
             feed.ParseFromString(data)
-
             positions = []
             for entity in feed.entity:
                 if not entity.HasField("vehicle"):
                     continue
-
                 v = entity.vehicle
                 positions.append({
                     "route_id": v.trip.route_id,
@@ -222,7 +199,6 @@ class BodsClient:
                     "source": "bods_vehicleposition"
                 })
             return positions
-
         except ImportError:
             return []
         except Exception as e:
@@ -230,19 +206,140 @@ class BodsClient:
             return []
 
 # ---------------------------------------------------------------------------
+# BAT API Client — Buses & Trains (UK JSON API)
+# ---------------------------------------------------------------------------
+class BatClient:
+    """
+    Buses & Trains API client for UK real-time bus and rail data.
+
+    Base URL: https://api.busesandtrains.co.uk
+    Auth: Authorization: Bearer <api_key>
+    Free tier: 300 requests/day
+
+    Endpoints used:
+      • /v1/stops?q={query}              — search stops
+      • /v1/stops/{atco}/departures      — live bus departures
+      • /v1/rail/stations/{crs}/departures — live rail departures
+    """
+    def __init__(self, api_key: str, base_url: str = "https://api.busesandtrains.co.uk"):
+        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+        })
+
+    @with_retries(max_attempts=2, backoff_base=1.5)
+    def search_stops(self, lat: float, lon: float, radius: int = 2000, limit: int = 10) -> list[dict]:
+        """Search for bus stops near a lat/lon."""
+        url = f"{self.base_url}/v1/stops"
+        params = {"lat": lat, "lon": lon, "radius": radius, "limit": limit}
+        resp = self.session.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        return resp.json().get("stops", [])
+
+    @with_retries(max_attempts=2, backoff_base=1.5)
+    def fetch_bus_departures(self, atco_code: str) -> list[dict]:
+        """Fetch live bus departures for a stop. Returns delay records."""
+        url = f"{self.base_url}/v1/stops/{atco_code}/departures"
+        resp = self.session.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        delays = []
+        for dep in data.get("departures", []):
+            scheduled = dep.get("scheduled")
+            expected = dep.get("expected")
+            if not scheduled or not expected:
+                continue
+            try:
+                from datetime import datetime as dt
+                sched_dt = dt.fromisoformat(scheduled.replace("Z", "+00:00"))
+                exp_dt = dt.fromisoformat(expected.replace("Z", "+00:00"))
+                delay_sec = (exp_dt - sched_dt).total_seconds()
+                if delay_sec <= 0:
+                    continue
+                delay_min = round(delay_sec / 60, 1)
+                delays.append({
+                    "route_id": dep.get("line", "unknown"),
+                    "route_name": f"{dep.get('line', '?')} to {dep.get('destination', '?')}",
+                    "delay_minutes": delay_min,
+                    "operator": dep.get("operator", ""),
+                    "stop_name": data.get("stop_name", ""),
+                    "source": "bat_bus",
+                })
+            except Exception:
+                continue
+        return delays
+
+    @with_retries(max_attempts=2, backoff_base=1.5)
+    def fetch_rail_departures(self, crs: str) -> list[dict]:
+        """Fetch live rail departures for a station CRS code."""
+        url = f"{self.base_url}/v1/rail/stations/{crs}/departures"
+        resp = self.session.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        delays = []
+        for dep in data.get("departures", []):
+            scheduled = dep.get("scheduled")
+            expected = dep.get("expected")
+            if not scheduled or not expected:
+                continue
+            try:
+                from datetime import datetime as dt
+                sched_dt = dt.fromisoformat(scheduled.replace("Z", "+00:00"))
+                exp_dt = dt.fromisoformat(expected.replace("Z", "+00:00"))
+                delay_sec = (exp_dt - sched_dt).total_seconds()
+                if delay_sec <= 60:  # Ignore sub-minute delays
+                    continue
+                delay_min = round(delay_sec / 60, 1)
+                is_cancelled = dep.get("is_cancelled", False)
+                if is_cancelled:
+                    delay_min = 60  # Treat cancellations as 60min delay
+                delays.append({
+                    "route_id": dep.get("line", crs),
+                    "route_name": f"{dep.get('origin', '?')} → {dep.get('destination', '?')}",
+                    "delay_minutes": delay_min,
+                    "operator": dep.get("operator", ""),
+                    "station": data.get("stop_name", ""),
+                    "platform": dep.get("platform", ""),
+                    "is_cancelled": is_cancelled,
+                    "source": "bat_rail",
+                })
+            except Exception:
+                continue
+        return delays
+
+    def fetch_all_delays(self, bus_stops: list[str] = None, rail_stations: list[str] = None) -> list[dict]:
+        """
+        Fetch delays from configured bus stops and rail stations.
+        Defaults to major London terminals if none provided.
+        """
+        delays = []
+        bus_stops = bus_stops or []
+        rail_stations = rail_stations or ["PAD", "EUS", "KGX", "MYB", "BHM", "MAN", "EDB", "GLQ"]
+
+        for atco in bus_stops:
+            try:
+                delays.extend(self.fetch_bus_departures(atco))
+            except Exception as e:
+                print(f"   ⚠️  Bus stop {atco} failed: {e}")
+
+        for crs in rail_stations:
+            try:
+                delays.extend(self.fetch_rail_departures(crs))
+            except Exception as e:
+                print(f"   ⚠️  Rail station {crs} failed: {e}")
+
+        return delays
+
+# ---------------------------------------------------------------------------
 # TfL API Client — London JSON (No Key Required)
 # ---------------------------------------------------------------------------
 class TflClient:
     """
     Transport for London Unified API client.
-
     Returns JSON (not GTFS-RT protobuf). No API key required.
-    Covers: bus, tube, DLR, Overground, Tram, River Bus
-
-    Use this mode for:
-      • London-only simulations
-      • Quick testing without API keys
-      • Tube/DLR/Overground status (not available on BODS)
     """
     def __init__(self, base_url: str = "https://api.tfl.gov.uk"):
         self.base_url = base_url.rstrip("/")
@@ -262,21 +359,14 @@ class TflClient:
         for item in data:
             line_id = item.get("id", "unknown")
             line_name = item.get("name", line_id)
-
             for status in item.get("lineStatuses", []):
                 reason = status.get("statusSeverityDescription", "")
                 severity = status.get("statusSeverity", 10)
-
                 # Only report actual disruptions (severity < 9)
-                # Severity 9 = Minor Delays (too noisy), 10 = Good Service
                 if severity >= 9:
                     continue
-
-                # Map severity to synthetic delay minutes
-                # 8 = Reduced Service (~8min), 6 = Severe (~20min), 0 = Suspended (60min)
                 delay_map = {8: 8, 7: 12, 6: 20, 5: 30, 4: 40, 3: 50, 2: 55, 1: 60, 0: 60}
                 delay_min = delay_map.get(severity, 10)
-
                 delays.append({
                     "route_id": line_id,
                     "route_name": line_name,
@@ -300,26 +390,22 @@ class GtfsRtClient:
     def fetch_trip_updates(self) -> list[dict]:
         resp = self.session.get(self.feed_url, timeout=20)
         resp.raise_for_status()
-
         try:
             from google.transit import gtfs_realtime_pb2
             feed = gtfs_realtime_pb2.FeedMessage()
             feed.ParseFromString(resp.content)
-
             delays = []
             for entity in feed.entity:
                 if not entity.HasField("trip_update"):
                     continue
                 tu = entity.trip_update
                 route_id = tu.trip.route_id
-
                 for stop_time in tu.stop_time_update:
                     delay_sec = 0
                     if stop_time.HasField("departure"):
                         delay_sec = stop_time.departure.delay
                     elif stop_time.HasField("arrival"):
                         delay_sec = stop_time.arrival.delay
-
                     if delay_sec > 0:
                         delays.append({
                             "route_id": route_id,
@@ -328,7 +414,6 @@ class GtfsRtClient:
                             "source": "gtfs_rt_direct"
                         })
             return delays
-
         except ImportError:
             print("   ⚠️  google.transit not installed. Run: pip install gtfs-realtime-bindings")
             return []
@@ -368,13 +453,10 @@ class GtfsStaticParser:
         loader = self.load()
         if loader is None:
             return []
-
         headways = loader.compute_headways(time_window=(25200, 34200))
         delays = []
-
         for (route_id, stop_id), headway_sec in headways.items():
             route = loader.routes.get(route_id, {})
-
             if headway_sec >= 3600:
                 delay_min = 15
             elif headway_sec >= 1800:
@@ -383,7 +465,6 @@ class GtfsStaticParser:
                 delay_min = 4
             else:
                 continue
-
             delays.append({
                 "route_id": route_id,
                 "route_name": route.get("short_name", route_id),
@@ -393,7 +474,6 @@ class GtfsStaticParser:
                 "headway_seconds": headway_sec,
                 "source": "gtfs_static_headway",
             })
-
         return delays
 
     def get_summary(self) -> dict:
@@ -412,15 +492,12 @@ def normalize_to_ctt(raw_delay: dict, fleet_pool: list[dict]) -> dict:
     route_name = raw_delay.get("route_name", route)
     mode = raw_delay.get("mode", "bus")
     fuel = raw_delay.get("fuel_type", "diesel")
-
     efficiency = max(0.15, 0.85 - (delay_min * 0.02))
-
     agent = random.choice(fleet_pool) if fleet_pool else {
         "truck_id": "CTT_HGV_001",
         "fuel_type": fuel,
         "base_efficiency": 0.72
     }
-
     return {
         "truck_id": agent["truck_id"],
         "fuel_type": agent["fuel_type"],
@@ -461,66 +538,50 @@ def run_gtfs_harvester(mode: str = "mock"):
     print(f"   Binding: {bind_addr}")
     print(f"   Poll interval: {config.HARVESTER_POLL_INTERVAL}s")
 
-    # Initialize backend client based on mode
     client = None
     parser = None
 
     if mode == "transitland":
         client = TransitlandClient(api_key=config.TRANSITLAND_API_KEY, base_url=config.TRANSITLAND_BASE_URL)
         print(f"   Backend: Transitland ({config.TRANSITLAND_BASE_URL})")
-
-        # --- CHECK FOR CACHED UK FEED FIRST ---
         dl_dir = Path(__file__).parent.parent.parent.parent / "data" / "gtfs"
         dl_dir.mkdir(parents=True, exist_ok=True)
-
-        # Look for existing UK BODS feed
         cached_feeds = list(dl_dir.glob("f-bus~dft~gov~uk*.zip"))
         if cached_feeds:
             cached_feed = cached_feeds[0]
             print(f"   ✅ Using cached UK feed: {cached_feed.name}")
-            parser = GtfsStaticParser(
-                feed_path=cached_feed,
-                service_date=None,
-                bbox=None,
-            )
+            parser = GtfsStaticParser(feed_path=cached_feed, service_date=None, bbox=None)
             summary = parser.get_summary()
             if summary:
                 print(f"   📊 Feed summary: {summary}")
         else:
-            # No cached feed - discover via API
             bbox_str = None
             if config.GTFS_BBOX:
                 parts = config.GTFS_BBOX.split(",")
                 if len(parts) == 4:
                     try:
                         a, b, c, d = float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])
-                        # Convert from lat-first to lon-first format
                         if a > 20 and b > -20 and b < 20:
                             bbox_str = f"{b},{a},{d},{c}"
                         else:
                             bbox_str = config.GTFS_BBOX
                     except ValueError:
                         bbox_str = config.GTFS_BBOX
-
             try:
                 feeds = client.get_feeds(bbox=bbox_str)
-                # Filter for UK feeds
                 uk_feeds = [f for f in feeds if client.is_uk_feed(f)]
                 feeds_to_use = uk_feeds if uk_feeds else feeds
-
                 print(f"   Discovered {len(feeds_to_use)} feed(s)")
                 for f in feeds_to_use[:5]:
                     print(f"      • {f.get('onestop_id', 'unknown')} — {f.get('name', 'unnamed')}")
             except Exception as e:
                 print(f"   ⚠️  Feed discovery failed: {e}")
                 feeds_to_use = []
-
             if feeds_to_use:
                 feed = feeds_to_use[0]
                 feed_id = feed.get("onestop_id")
                 if feed_id:
                     downloaded_feed_path = dl_dir / f"{feed_id}.zip"
-
                     if downloaded_feed_path.exists():
                         print(f"   Using cached feed: {downloaded_feed_path}")
                     else:
@@ -531,19 +592,13 @@ def run_gtfs_harvester(mode: str = "mock"):
                         except Exception as e:
                             print(f"   ❌ Download failed: {e}")
                             downloaded_feed_path = None
-
                     if downloaded_feed_path and downloaded_feed_path.exists():
                         bbox_tuple = None
                         if config.GTFS_BBOX:
                             parts = [float(p) for p in config.GTFS_BBOX.split(",")]
                             if len(parts) == 4:
                                 bbox_tuple = (parts[1], parts[0], parts[3], parts[2])
-
-                        parser = GtfsStaticParser(
-                            feed_path=downloaded_feed_path,
-                            service_date=None,
-                            bbox=bbox_tuple,
-                        )
+                        parser = GtfsStaticParser(feed_path=downloaded_feed_path, service_date=None, bbox=bbox_tuple)
                         summary = parser.get_summary()
                         if summary:
                             print(f"   📊 Feed summary: {summary}")
@@ -552,6 +607,12 @@ def run_gtfs_harvester(mode: str = "mock"):
         client = BodsClient(api_key=config.BODS_API_KEY, base_url=config.BODS_BASE_URL)
         print(f"   Backend: BODS ({config.BODS_BASE_URL})")
         print(f"   Coverage: UK-wide bus (England, Scotland, Wales)")
+
+    elif mode == "bat":
+        client = BatClient(api_key=config.BAT_API_KEY, base_url=config.BAT_BASE_URL)
+        print(f"   Backend: BAT ({config.BAT_BASE_URL})")
+        print(f"   Coverage: UK bus + rail (JSON API)")
+        print(f"   Rate limit: 300 req/day — polling every {config.HARVESTER_POLL_INTERVAL}s")
 
     elif mode == "tfl":
         client = TflClient(base_url=config.TFL_BASE_URL)
@@ -574,14 +635,22 @@ def run_gtfs_harvester(mode: str = "mock"):
         while True:
             cycle += 1
             print(f"\n🔄 Poll cycle {cycle}")
-
             raw_delays = []
-
             try:
                 if mode == "transitland" and parser:
                     raw_delays = parser.extract_delays_from_headways()
                 elif mode == "bods" and client:
                     raw_delays = client.fetch_trip_updates()
+                elif mode == "bat" and client:
+                    # BAT mode: fetch from configured stops/stations
+                    bus_stops = getattr(config, 'BAT_BUS_STOPS', '').split(',') if getattr(config, 'BAT_BUS_STOPS', '') else []
+                    bus_stops = [s.strip() for s in bus_stops if s.strip()]
+                    rail_stations = getattr(config, 'BAT_RAIL_STATIONS', '').split(',') if getattr(config, 'BAT_RAIL_STATIONS', '') else []
+                    rail_stations = [s.strip() for s in rail_stations if s.strip()]
+                    if not bus_stops and not rail_stations:
+                        # Default to major UK rail terminals
+                        rail_stations = ["PAD", "EUS", "KGX", "MYB", "BHM", "MAN", "EDB", "GLQ"]
+                    raw_delays = client.fetch_all_delays(bus_stops=bus_stops, rail_stations=rail_stations)
                 elif mode == "tfl" and client:
                     raw_delays = client.fetch_line_status()
                 elif mode == "gtfs" and client:

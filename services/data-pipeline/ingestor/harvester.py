@@ -7,12 +7,14 @@ Modes:
   mock        → Simulated SME data (development / CI)
   transitland → GTFS static feed discovery & download (offline simulation)
   gtfs        → Generic direct GTFS-RT protobuf feed
-  bods        → UK Bus Open Data Service (real-time bus, requires API key)
+  bods        → UK Bus Open Data Service (real-time bus, requires BODS_API_KEY)
+  bat         → Buses & Trains API (UK bus/rail JSON, requires BAT_API_KEY)
   tfl         → Transport for London JSON API (no key, London only)
 
 Usage:
   python harvester.py --mode mock
   python harvester.py --mode bods
+  python harvester.py --mode bat
   python harvester.py --mode tfl
   python harvester.py --mode transitland
 """
@@ -27,7 +29,7 @@ def main():
     parser = argparse.ArgumentParser(description="CTT Data Harvester")
     parser.add_argument(
         "--mode",
-        choices=["mock", "gtfs", "transitland", "bods", "tfl"],
+        choices=["mock", "gtfs", "transitland", "bods", "bat", "tfl"],
         default=config.HARVESTER_MODE,
         help="Harvesting backend to use"
     )
@@ -44,6 +46,7 @@ def main():
         print("  transitland — GTFS static feed discovery & download (offline simulation)")
         print("  gtfs        — Direct GTFS-RT protobuf feed (generic)")
         print("  bods        — UK Bus Open Data Service (real-time, requires BODS_API_KEY)")
+        print("  bat         — Buses & Trains API (UK bus/rail JSON, requires BAT_API_KEY)")
         print("  tfl         — Transport for London JSON API (no key, London only)")
         sys.exit(0)
 
@@ -52,7 +55,7 @@ def main():
     if args.mode == "mock":
         from harvester_mock import run_harvester as run_mock
         run_mock()
-    elif args.mode in ("gtfs", "transitland", "bods", "tfl"):
+    elif args.mode in ("gtfs", "transitland", "bods", "bat", "tfl"):
         from gtfs_harvester import run_gtfs_harvester
         run_gtfs_harvester(mode=args.mode)
     else:

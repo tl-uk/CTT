@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libzmq3-dev \
     libprotobuf-dev \
     protobuf-compiler \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build

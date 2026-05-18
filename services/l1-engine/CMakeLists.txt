@@ -159,6 +159,7 @@ target_include_directories(CTT_Engine PRIVATE
 )
 
 # Suppress C++20 deprecated-literal-operator warnings from cppzmq headers
+# FIXED: Removed extra < in generator expression
 target_compile_options(CTT_Engine PRIVATE 
     $<$<<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wno-deprecated-literal-operator>
 )

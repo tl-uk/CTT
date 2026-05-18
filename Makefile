@@ -154,9 +154,22 @@ clean-engine: ## Remove L1 Engine build artifacts
 
 docker-engine: ## Build L1 Engine Docker image
 	@which docker >/dev/null 2>&1 || { \
-		echo "❌ Docker not found in PATH."; \
-		echo "   Install: https://docs.docker.com/get-docker/"; \
-		echo "   Or build natively with: make build-engine"; \
+		echo "❌ Docker binary not found in PATH."; \
+		echo "   macOS:  brew install docker colima"; \
+		echo "   Linux:  https://docs.docker.com/get-docker/"; \
+		echo "   Or build natively: make build-engine"; \
+		exit 1; \
+	}
+	@docker info >/dev/null 2>&1 || { \
+		echo "❌ Docker daemon is not running."; \
+		echo ""; \
+		echo "   If you use Colima:"; \
+		echo "      colima start --cpu 4 --memory 8"; \
+		echo ""; \
+		echo "   If you use Docker Desktop:"; \
+		echo "      Open Docker Desktop from Applications and wait for the whale icon."; \
+		echo ""; \
+		echo "   Or build natively: make build-engine"; \
 		exit 1; \
 	}
 	@echo "🐳 Building L1 Engine Docker image..."

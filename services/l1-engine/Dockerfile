@@ -16,14 +16,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libprotobuf-dev \
     protobuf-compiler \
     git \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
-# Copy project root so Makefile and api/proto are accessible
 COPY . .
 
-# Build using the cross-platform Makefile
 RUN make build-engine
 
 # -----------------------------------------------------------------------------
@@ -38,7 +37,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /build/services/l1-engine/build/CTT_Engine /usr/local/bin/CTT_Engine
 
-# ZMQ telemetry out, ZMQ perturbations in, Flecs REST API
 EXPOSE 5555/tcp
 EXPOSE 5556/tcp
 EXPOSE 27750/tcp

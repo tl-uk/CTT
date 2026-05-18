@@ -1,8 +1,0 @@
-./CMakeLists.txt
-./include/AgentComponents.hpp
-./include/DataBridge.hpp
-./include/SimulationEngine.hpp
-./src/DataBridge.cpp
-./src/SimulationEngine.cpp
-./src/main.cpp
-./test_bridge.py

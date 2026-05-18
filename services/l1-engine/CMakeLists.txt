@@ -160,7 +160,7 @@ target_include_directories(CTT_Engine PRIVATE
 
 # Suppress C++20 deprecated-literal-operator warnings from cppzmq headers
 target_compile_options(CTT_Engine PRIVATE 
-    $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wno-deprecated-literal-operator>
+    $<$<<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wno-deprecated-literal-operator>
 )
 
 target_link_libraries(CTT_Engine PRIVATE 

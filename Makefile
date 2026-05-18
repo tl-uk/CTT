@@ -69,6 +69,7 @@ help: ## Show this help message
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-engine     → Build L1 Engine Docker image"
+	@echo "  docker compose up      → Launch full stack (requires docker-compose.yml)"
 	@echo ""
 
 # =============================================================================
@@ -152,6 +153,12 @@ clean-engine: ## Remove L1 Engine build artifacts
 	@echo "✅ Clean complete"
 
 docker-engine: ## Build L1 Engine Docker image
+	@which docker >/dev/null 2>&1 || { \
+		echo "❌ Docker not found in PATH."; \
+		echo "   Install: https://docs.docker.com/get-docker/"; \
+		echo "   Or build natively with: make build-engine"; \
+		exit 1; \
+	}
 	@echo "🐳 Building L1 Engine Docker image..."
 	@docker build -f $(L1_DIR)/Dockerfile -t ctt-engine:latest .
 	@echo "✅ Docker image ctt-engine:latest built"

@@ -1,6 +1,6 @@
 # CTT Project Structure
 
-**Generated:** Mon May 18 21:36:35 BST 2026
+**Generated:** Mon May 18 22:33:32 BST 2026
 
 ```
 └── CTT
@@ -10,6 +10,7 @@
     ├── api
     │   └── proto
     │       └── ctt_messages.proto
+    ├── docker-compose.yml
     ├── scripts
     │   ├── diag_bat_key.py
     │   ├── generate_project_tree.py
@@ -41,10 +42,10 @@
         ├── l1-engine
         │   ├── CMakeLists.txt
         │   ├── include
-        │   │   ├── AgentComponents.hpp
-        │   │   ├── DataBridge.hpp
-        │   │   ├── PortConfig.hpp
-        │   │   └── SimulationEngine.hpp
+        │   │   ├── AgentComponents.h
+        │   │   ├── DataBridge.h
+        │   │   ├── PortConfig.h
+        │   │   └── SimulationEngine.h
         │   └── src
         │       ├── DataBridge.cpp
         │       ├── SimulationEngine.cpp

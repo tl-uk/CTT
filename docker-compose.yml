@@ -1,0 +1,91 @@
+# =============================================================================
+# CTT Phase 5 — Full Stack Orchestration
+# Usage: docker compose up --build
+# =============================================================================
+
+services:
+  engine:
+    build:
+      context: .
+      dockerfile: services/l1-engine/Dockerfile
+    container_name: ctt-engine
+    ports:
+      - "5555:5555"
+      - "27750:27750"
+    expose:
+      - "5556"
+    environment:
+      - CTT_L1_ENGINE_HOST=engine
+      - CTT_FUSION_HOST=fusion
+    networks:
+      - ctt
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "5555"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
+  harvester:
+    build:
+      context: .
+      dockerfile: services/data-pipeline/ingestor/Dockerfile
+    container_name: ctt-harvester
+    environment:
+      - HARVESTER_MODE=mock
+      - HARVESTER_POLL_INTERVAL=5
+      - CTT_HARVESTER_HOST=harvester
+      - CTT_INTERPRETER_HOST=interpreter
+    networks:
+      - ctt
+    depends_on:
+      interpreter:
+        condition: service_started
+
+  interpreter:
+    build:
+      context: .
+      dockerfile: services/data-pipeline/interpreter/Dockerfile
+    container_name: ctt-interpreter
+    environment:
+      - CTT_HARVESTER_HOST=harvester
+      - CTT_INTERPRETER_HOST=interpreter
+      - CTT_FUSION_HOST=fusion
+    networks:
+      - ctt
+    depends_on:
+      fusion:
+        condition: service_started
+
+  fusion:
+    build:
+      context: .
+      dockerfile: services/data-pipeline/fusion/Dockerfile
+    container_name: ctt-fusion
+    environment:
+      - CTT_INTERPRETER_HOST=interpreter
+      - CTT_FUSION_HOST=fusion
+      - CTT_L1_ENGINE_HOST=engine
+    networks:
+      - ctt
+    depends_on:
+      engine:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: services/l2-bridge/Dockerfile
+    container_name: ctt-dashboard
+    ports:
+      - "5000:5000"
+    environment:
+      - CTT_L1_ENGINE_HOST=engine
+    networks:
+      - ctt
+    depends_on:
+      engine:
+        condition: service_healthy
+
+networks:
+  ctt:
+    driver: bridge

@@ -2,8 +2,8 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
-#include "SimulationEngine.hpp"
-#include "DataBridge.hpp"
+#include "SimulationEngine.h"
+#include "DataBridge.h"
 
 int main() {
     std::cout << "--- CTT Master Engine Online ---" << std::endl;

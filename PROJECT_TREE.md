@@ -1,6 +1,6 @@
 # CTT Project Structure
 
-**Generated:** Sun May 17 18:20:14 BST 2026
+**Generated:** Mon May 18 21:36:35 BST 2026
 
 ```
 └── CTT
@@ -11,7 +11,12 @@
     │   └── proto
     │       └── ctt_messages.proto
     ├── scripts
+    │   ├── diag_bat_key.py
     │   ├── generate_project_tree.py
+    │   ├── monitor_pipeline.py
+    │   ├── observe_pipeline.py
+    │   ├── test_bat_api.py
+    │   ├── test_bat_bus.py
     │   ├── test_e2e.py
     │   ├── test_py_cpp_bridge.py
     │   └── test_sme_feed.py

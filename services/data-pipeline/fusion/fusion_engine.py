@@ -4,7 +4,7 @@ services/data-pipeline/fusion/fusion_engine.py
 Fusion Engine: Subscribes to interpreted data, serializes Protobuf perturbations,
 and broadcasts to the C++ L1 Engine.
 
-CRITICAL FIX: This module BINDS a PUB socket on port 5556.
+CRITICAL: This module BINDS a PUB socket on port 5556.
 The C++ engine SUB connects to this address.
 """
 import zmq
@@ -18,7 +18,7 @@ from ports import ZMQ_PORTS
 
 # Protobuf import
 try:
-    from ctt_messages_pb2 import MindsetPerturbation #type: ignore
+    from ctt_messages_pb2 import MindsetPerturbation  # type: ignore
 except ImportError:
     print("❌ ctt_messages_pb2.py not found. Run: make proto")
     raise
@@ -32,7 +32,6 @@ def run_fusion():
     sub.setsockopt_string(zmq.SUBSCRIBE, "")
 
     # Output: Protobuf perturbations to L1 Engine
-    # FIX: We BIND here because C++ SUB connects to us.
     l1_control = context.socket(zmq.PUB)
     l1_control.bind(ZMQ_PORTS["L1_PERTURBATION_PUB"])
 
@@ -40,7 +39,8 @@ def run_fusion():
     print(f"   Input:  {ZMQ_PORTS['INTERPRETER_SUB']}")
     print(f"   Output: {ZMQ_PORTS['L1_PERTURBATION_PUB']}  ← BIND (C++ connects here)")
 
-    # Slow-joiner guard
+    # Slow-joiner guard: in container networks 0.5s is usually sufficient,
+    # but ZMQ connections are async. Sleep allows peers to handshake.
     time.sleep(0.5)
 
     while True:

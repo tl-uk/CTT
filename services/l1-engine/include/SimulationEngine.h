@@ -1,7 +1,7 @@
-// services/l1-engine/include/SimulationEngine.hpp
+// services/l1-engine/include/SimulationEngine.h
 #pragma once
 #include <flecs.h>
-#include "AgentComponents.hpp"
+#include "AgentComponents.h"
 
 namespace CTT {
 

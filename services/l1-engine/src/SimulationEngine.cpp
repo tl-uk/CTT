@@ -1,5 +1,5 @@
 // services/l1-engine/src/SimulationEngine.cpp
-#include "SimulationEngine.hpp"
+#include "SimulationEngine.h"
 #include <iostream>
 
 namespace CTT {
@@ -127,12 +127,12 @@ void CTT::SimulationEngine::register_reflection() {
 
     world.component<EnergyComponent>()
         .member<float>("currentEnergyStorage")
-        .member<float>("maxCapacity")
+        .member<float>("maxEnergyStorage")
         .member<float>("baseEfficiency");
         
     world.component<KinematicComponent>()
         .member<float>("speed_mps")
-        .member<float>("heading_deg");
+        .member<float>("heading");
 }
 
 } // namespace CTT

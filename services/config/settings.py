@@ -9,24 +9,32 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Load .env from project root (CTT/.env)
-# Use resolve() to eliminate '..' and symlinks, then walk up to project root
-_settings_file = Path(__file__).resolve()  # absolute, no symlinks, no ..
-PROJECT_ROOT = _settings_file.parent.parent.parent  # CTT/services/config/ → CTT/
+_settings_file = Path(__file__).resolve()
+PROJECT_ROOT = _settings_file.parent.parent.parent
 env_path = PROJECT_ROOT / ".env"
 
 load_dotenv(env_path)
 
 class CTTConfig:
-    """Typed configuration with validation."""
+    """Typed configuration with validation.
 
+    ZMQ env vars below override the bind addresses in ports.py.
+    Subscribers use ports.py (with optional CTT_*_HOST overrides).
+    """
+
+    # --- Bind addresses (used by services that PUB) ---
     ZMQ_HARVESTER_PUB = os.getenv("ZMQ_HARVESTER_PUB", "tcp://*:5560")
     ZMQ_INTERPRETER_PUB = os.getenv("ZMQ_INTERPRETER_PUB", "tcp://*:5561")
-    ZMQ_FUSION_PUB = os.getenv("ZMQ_FUSION_PUB", "tcp://*:5556")
+    ZMQ_FUSION_PUB = os.getenv("ZMQ_FUSION_PUB", "tcp://*:5556")  # L1_PERTURBATION_PUB
+
+    # --- Connect addresses (used by observers/dashboards) ---
     ZMQ_TELEMETRY_SUB = os.getenv("ZMQ_TELEMETRY_SUB", "tcp://localhost:5555")
 
+    # --- Harvester backend selection ---
     HARVESTER_MODE = os.getenv("HARVESTER_MODE", "mock")
     HARVESTER_POLL_INTERVAL = int(os.getenv("HARVESTER_POLL_INTERVAL", "30"))
 
+    # --- API Keys & Endpoints ---
     TRANSITLAND_API_KEY = os.getenv("TRANSITLAND_API_KEY", "")
     TRANSITLAND_BASE_URL = os.getenv("TRANSITLAND_BASE_URL", "https://transit.land/api/v2")
     GTFS_BBOX = os.getenv("GTFS_BBOX", "51.2,-0.6,51.8,0.4")

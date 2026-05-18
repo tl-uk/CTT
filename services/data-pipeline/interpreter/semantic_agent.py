@@ -4,8 +4,9 @@ services/data-pipeline/interpreter/semantic_agent.py
 Semantic Interpreter: Maps raw harvester data to CTT Mindset perturbations.
 Handles both SME format (efficiency_score) and GTFS format (impact/delay_minutes).
 """
-import zmq
 import json
+import time  # FIXED: moved to top-level (was trapped inside __main__)
+import zmq
 import sys
 import os
 
@@ -22,16 +23,13 @@ def calculate_pressure(raw_data: dict) -> float:
       3. Default: 50.0
     """
     if "efficiency_score" in raw_data:
-        # Lower efficiency = higher pressure
         score = float(raw_data["efficiency_score"])
         return round((1.0 - score) * 100, 1)
 
     if "impact" in raw_data:
-        # Legacy harvester format: impact is already a pressure proxy
         return float(raw_data["impact"])
 
     if "delay_minutes" in raw_data:
-        # GTFS-style: 1 minute delay ≈ 1.5 pressure units
         return min(100.0, float(raw_data["delay_minutes"]) * 1.5)
 
     return 50.0
@@ -62,6 +60,9 @@ def run_semantic_interpreter():
         except json.JSONDecodeError as e:
             print(f"   ⚠️  Malformed JSON: {e}")
             continue
+        except zmq.ZMQError as e:
+            print(f"   ⚠️  ZMQ error: {e}")
+            continue
 
         truck_id = raw.get("truck_id", "all_hgv")
         pressure = calculate_pressure(raw)
@@ -79,5 +80,4 @@ def run_semantic_interpreter():
         print(f"   → {truck_id:20s} | pressure={pressure:5.1f} | route={interpreted['route']}")
 
 if __name__ == "__main__":
-    import time  # imported here for startup guard
     run_semantic_interpreter()

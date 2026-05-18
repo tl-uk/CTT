@@ -44,6 +44,8 @@ def run_harvester():
     print("📡 Mock Harvester Online")
     print(f"   Binding: {ZMQ_PORTS['HARVESTER_PUB']}")
     print(f"   Fleet: {len(MOCK_FLEET)} agents")
+
+    # Slow-joiner guard: allow interpreter SUB to connect before first message
     time.sleep(0.5)
 
     try:

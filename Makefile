@@ -1,12 +1,17 @@
 # =============================================================================
-# CTT Project — Hardened Root Makefile
-# Microservices build orchestration for Apple Silicon (M3)
+# CTT Project — Cross-Platform Build Orchestration (macOS / Linux / Docker)
 # =============================================================================
 
-.PHONY: help all check-deps configure-engine build-engine run-engine run-engine-fast         clean-engine setup-python setup-l3 run-dashboard clean-all         run-explorer run-explorer-bg         run-harvester run-interpreter run-fusion         run-harvester-bg run-interpreter-bg run-fusion-bg         test-bridge test-e2e test-pipeline stop-pipeline healthcheck         check-ports proto proto-clean fmt-engine lint-engine
+.PHONY: help all check-deps configure-engine build-engine run-engine run-engine-fast \
+        clean-engine setup-python setup-l3 run-dashboard \
+        run-explorer run-explorer-bg \
+        run-harvester run-interpreter run-fusion \
+        run-harvester-bg run-interpreter-bg run-fusion-bg \
+        test-bridge test-e2e test-pipeline stop-pipeline healthcheck \
+        check-ports proto proto-clean fmt-engine lint-engine docker-engine
 
-# Detect CPU cores for parallel builds (macOS/Linux)
-NPROCS := $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
+# Detect CPU cores for parallel builds
+NPROCS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # Service directories
 L1_DIR     := services/l1-engine
@@ -14,6 +19,34 @@ L2_DIR     := services/l2-bridge
 L3_DIR     := services/l3-analytics
 BUILD_DIR  := $(L1_DIR)/build
 CONFIG_DIR := services/config
+
+# =============================================================================
+# Platform Detection (macOS vs Linux/Docker)
+# =============================================================================
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+
+ifeq ($(UNAME_S),Darwin)
+    CMAKE_PLATFORM_ARGS := -DCMAKE_OSX_ARCHITECTURES=$(UNAME_M)
+    ifeq ($(UNAME_M),arm64)
+        ZMQ_PREFIX ?= /opt/homebrew/opt/zeromq
+    else
+        ZMQ_PREFIX ?= /usr/local/opt/zeromq
+    endif
+    CMAKE_EXTRA := -DCMAKE_PREFIX_PATH=$(ZMQ_PREFIX)
+else
+    # Linux / Docker — standard system paths via pkg-config
+    CMAKE_PLATFORM_ARGS :=
+    CMAKE_EXTRA :=
+endif
+
+# =============================================================================
+# Python Tooling Detection (uv preferred, falls back to venv+pip)
+# =============================================================================
+HAS_UV := $(shell which uv 2>/dev/null)
+PYTHON_VENV_CMD  := $(if $(HAS_UV),uv venv --python 3.13,python3 -m venv .venv)
+PYTHON_PIP_CMD   := $(if $(HAS_UV),uv pip install,.venv/bin/pip install)
+PYTHON_BIN       := $(L2_DIR)/.venv/bin/python
 
 # =============================================================================
 # Help
@@ -24,58 +57,70 @@ help: ## Show this help message
 	@echo "║           CTT Project — Build & Run Commands                 ║"
 	@echo "╚══════════════════════════════════════════════════════════════╝"
 	@echo ""
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 	@echo ""
-	@echo "Quick start (development):"
-	@echo "  1. make check-deps     → Verify Homebrew dependencies"
+	@echo "Quick start (native):"
+	@echo "  1. make check-deps     → Verify dependencies"
 	@echo "  2. make build-engine   → Compile the C++ L1 Engine"
 	@echo "  3. make run-engine     → Build & launch the Engine"
 	@echo "  4. make setup-python   → Prepare L2 Bridge environment"
-	@echo "  5. make test-e2e       → Verify full pipeline (engine must be running)"
+	@echo "  5. make test-e2e       → Verify full pipeline"
 	@echo ""
-	@echo "Production pipeline:"
-	@echo "  make test-pipeline     → Start all components, run E2E test, stop"
+	@echo "Docker:"
+	@echo "  make docker-engine     → Build L1 Engine Docker image"
 	@echo ""
 
 # =============================================================================
 # Internal Helpers
 # =============================================================================
 
-# Check if a TCP port is already in use on macOS/Linux
-# Usage: $(call check-port-free,5560,harvester)
 define check-port-free
-	@if lsof -i :$(1) >/dev/null 2>&1; then 		echo "❌ Port $(1) already in use. Run 'make stop-pipeline' first."; 		exit 1; 	else 		echo "✅ Port $(1) is free for $(2)"; 	fi
+	@if lsof -i :$(1) >/dev/null 2>&1; then \
+		echo "❌ Port $(1) already in use. Run 'make stop-pipeline' first."; \
+		exit 1; \
+	else \
+		echo "✅ Port $(1) is free for $(2)"; \
+	fi
 endef
 
-# Wait until a process binds to a TCP port (timeout 5s)
-# Usage: $(call wait-for-port,5560,harvester)
 define wait-for-port
 	@echo "⏳ Waiting for $(2) to bind port $(1)..."
-	@for i in $$(seq 1 25); do 		if nc -z localhost $(1) 2>/dev/null; then 			echo "✅ $(2) is listening on $(1)"; 			exit 0; 		fi; 		sleep 0.2; 	done; 	echo "❌ $(2) failed to bind port $(1) within 5s"; 	exit 1
-endef
-
-# Verify a background PID is alive
-# Usage: $(call check-pid-alive,PID,name)
-define check-pid-alive
-	@if ! kill -0 $(1) 2>/dev/null; then 		echo "❌ $(2) (PID $(1)) died immediately. Check logs."; 		exit 1; 	fi
+	@for i in $$(seq 1 25); do \
+		if nc -z localhost $(1) 2>/dev/null; then \
+			echo "✅ $(2) is listening on $(1)"; \
+			exit 0; \
+		fi; \
+		sleep 0.2; \
+	done; \
+	echo "❌ $(2) failed to bind port $(1) within 5s"; \
+	exit 1
 endef
 
 # =============================================================================
 # L1 Engine — C++ Flecs Core
 # =============================================================================
 
-check-deps: ## Verify macOS system dependencies (cmake, ninja, pkg-config, zeromq)
+check-deps: ## Verify system dependencies (cmake, ninja, pkg-config, zeromq)
 	@echo "🔍 Checking system dependencies..."
-	@which cmake >/dev/null 2>&1 || (echo "❌ cmake not found. Run: brew install cmake ninja" && exit 1)
-	@which ninja >/dev/null 2>&1 || (echo "❌ ninja not found. Run: brew install ninja" && exit 1)
-	@which pkg-config >/dev/null 2>&1 || (echo "❌ pkg-config not found. Run: brew install pkg-config" && exit 1)
-	@test -d /opt/homebrew/opt/zeromq/lib || (echo "❌ zeromq not found. Run: brew install zeromq" && exit 1)
+	@which cmake >/dev/null 2>&1 || (echo "❌ cmake not found. Install: apt install cmake ninja-build pkg-config" && exit 1)
+	@which ninja >/dev/null 2>&1 || (echo "❌ ninja not found. Install: apt install ninja-build" && exit 1)
+	@which pkg-config >/dev/null 2>&1 || (echo "❌ pkg-config not found. Install: apt install pkg-config" && exit 1)
+ifeq ($(UNAME_S),Darwin)
+	@test -d $(ZMQ_PREFIX)/lib || (echo "❌ zeromq not found at $(ZMQ_PREFIX). Run: brew install zeromq" && exit 1)
+else
+	@pkg-config --exists libzmq || (echo "❌ libzmq not found. Run: apt install libzmq3-dev" && exit 1)
+endif
 	@echo "✅ All system dependencies found"
 
 configure-engine: check-deps ## Configure CMake for L1 Engine (clean configure)
 	@echo "⚙️  Configuring L1 Engine..."
 	@rm -rf $(BUILD_DIR)
-	@cmake -B $(BUILD_DIR) -S $(L1_DIR) -G Ninja 		-DCMAKE_BUILD_TYPE=Release 		-DCMAKE_OSX_ARCHITECTURES=arm64 		-DCMAKE_POLICY_VERSION_MINIMUM=3.5
+	@cmake -B $(BUILD_DIR) -S $(L1_DIR) -G Ninja \
+		-DCMAKE_BUILD_TYPE=Release \
+		$(CMAKE_PLATFORM_ARGS) \
+		$(CMAKE_EXTRA) \
+		-DCMAKE_POLICY_VERSION_MINIMUM=3.5
 	@echo "✅ Configure complete"
 
 build-engine: configure-engine ## Build the C++ L1 Engine with all cores
@@ -83,7 +128,6 @@ build-engine: configure-engine ## Build the C++ L1 Engine with all cores
 	@cmake --build $(BUILD_DIR) --parallel $(NPROCS)
 	@echo ""
 	@echo "✅ Build complete: $(BUILD_DIR)/CTT_Engine"
-	@echo "   Verify binary:   file $(BUILD_DIR)/CTT_Engine"
 	@echo ""
 
 run-engine: build-engine ## Build and run the L1 Engine (blocks terminal)
@@ -95,7 +139,10 @@ run-engine: build-engine ## Build and run the L1 Engine (blocks terminal)
 	@./$(BUILD_DIR)/CTT_Engine
 
 run-engine-fast: ## Run L1 Engine WITHOUT rebuilding (blocks terminal)
-	@if [ ! -f $(BUILD_DIR)/CTT_Engine ]; then 		echo "❌ Engine not built. Run 'make build-engine' first."; 		exit 1; 	fi
+	@if [ ! -f $(BUILD_DIR)/CTT_Engine ]; then \
+		echo "❌ Engine not built. Run 'make build-engine' first."; \
+		exit 1; \
+	fi
 	@echo "🚀 Starting CTT L1 Engine (fast mode, no rebuild)..."
 	@./$(BUILD_DIR)/CTT_Engine
 
@@ -104,14 +151,19 @@ clean-engine: ## Remove L1 Engine build artifacts
 	@rm -rf $(BUILD_DIR)
 	@echo "✅ Clean complete"
 
+docker-engine: ## Build L1 Engine Docker image
+	@echo "🐳 Building L1 Engine Docker image..."
+	@docker build -f $(L1_DIR)/Dockerfile -t ctt-engine:latest .
+	@echo "✅ Docker image ctt-engine:latest built"
+
 # =============================================================================
 # L2 Bridge — Python Telemetry & Dashboard
 # =============================================================================
 
 setup-python: ## Create Python venv and install L2 Bridge dependencies
 	@echo "🐍 Setting up Python environment for L2 Bridge..."
-	@cd $(L2_DIR) && uv venv --python 3.13
-	@cd $(L2_DIR) && . .venv/bin/activate && uv pip install -r requirements.txt
+	@cd $(L2_DIR) && $(PYTHON_VENV_CMD)
+	@cd $(L2_DIR) && $(PYTHON_PIP_CMD) -r requirements.txt
 	@echo "✅ Python environment ready in $(L2_DIR)/.venv"
 
 run-dashboard: ## Run the L2 Bridge dashboard (requires engine running)
@@ -124,8 +176,8 @@ run-dashboard: ## Run the L2 Bridge dashboard (requires engine running)
 
 setup-l3: ## Setup L3 Analytics environment
 	@echo "🐍 Setting up L3 Analytics..."
-	@cd $(L3_DIR) && uv venv --python 3.13
-	@cd $(L3_DIR) && . .venv/bin/activate && uv pip install -r requirements.txt
+	@cd $(L3_DIR) && $(PYTHON_VENV_CMD)
+	@cd $(L3_DIR) && $(PYTHON_PIP_CMD) -r requirements.txt
 
 # =============================================================================
 # Data Pipeline — Inbound Refinery
@@ -175,7 +227,19 @@ healthcheck: ## Quick check: are all expected ports listening?
 	@echo "────────────────────────────────────────"
 	@echo "Component          | Port | Status"
 	@echo "────────────────────────────────────────"
-	@for port in 5555 5556 5560 5561; do 		if nc -z localhost $$port 2>/dev/null; then 			status="✅ UP"; 		else 			status="⬜ DOWN"; 		fi; 		case $$port in 			5555) echo "L1 Engine (telemetry) | 5555 | $$status" ;; 			5556) echo "Fusion (perturbations)| 5556 | $$status" ;; 			5560) echo "Harvester (raw data)  | 5560 | $$status" ;; 			5561) echo "Interpreter (mapped)  | 5561 | $$status" ;; 		esac; 	done
+	@for port in 5555 5556 5560 5561; do \
+		if nc -z localhost $$port 2>/dev/null; then \
+			status="✅ UP"; \
+		else \
+			status="⬜ DOWN"; \
+		fi; \
+		case $$port in \
+			5555) echo "L1 Engine (telemetry) | 5555 | $$status" ;; \
+			5556) echo "Fusion (perturbations)| 5556 | $$status" ;; \
+			5560) echo "Harvester (raw data)  | 5560 | $$status" ;; \
+			5561) echo "Interpreter (mapped)  | 5561 | $$status" ;; \
+		esac; \
+	done
 	@echo "────────────────────────────────────────"
 
 test-e2e: ## Run end-to-end pipeline test (requires engine running)
@@ -216,12 +280,17 @@ stop-pipeline: ## Kill all background pipeline processes
 EXPLORER_DIR := $(HOME)/explorer
 
 run-explorer: ## Host Flecs Explorer on http://localhost:8000
-	@if [ ! -d $(EXPLORER_DIR)/etc ]; then 		echo "🌐 Flecs Explorer not found. Cloning to $(EXPLORER_DIR)..."; 		git clone --depth 1 https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); 	fi
+	@if [ ! -d $(EXPLORER_DIR)/etc ]; then \
+		echo "🌐 Flecs Explorer not found. Cloning to $(EXPLORER_DIR)..."; \
+		git clone --depth 1 https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); \
+	fi
 	@echo "🌐 Starting Flecs Explorer at http://localhost:8000"
 	@cd $(EXPLORER_DIR)/etc && python3 -m http.server 8000
 
 run-explorer-bg: ## Start Flecs Explorer in background
-	@if [ ! -d $(EXPLORER_DIR)/etc ]; then 		git clone --depth 1 https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); 	fi
+	@if [ ! -d $(EXPLORER_DIR)/etc ]; then \
+		git clone --depth 1 https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); \
+	fi
 	@cd $(EXPLORER_DIR)/etc && nohup python3 -m http.server 8000 > /tmp/ctt_explorer.log 2>&1 &
 	@echo "🌐 Explorer backgrounded (log: /tmp/ctt_explorer.log)"
 
@@ -232,9 +301,12 @@ run-explorer-bg: ## Start Flecs Explorer in background
 PROTO_FILE := api/proto/ctt_messages.proto
 PROTO_OUT  := services/data-pipeline/fusion
 
-proto: ## Generate Python protobuf module using venv-matched protoc
+proto: ## Generate Python protobuf module
 	@echo "🧬 Generating Protobuf bindings..."
-	@$(L2_DIR)/.venv/bin/python -m grpc_tools.protoc 		--python_out=$(PROTO_OUT) 		-Iapi/proto 		$(PROTO_FILE)
+	@$(PYTHON_BIN) -m grpc_tools.protoc \
+		--python_out=$(PROTO_OUT) \
+		-Iapi/proto \
+		$(PROTO_FILE)
 	@echo "✅ Generated: $(PROTO_OUT)/ctt_messages_pb2.py"
 
 proto-clean: ## Remove generated protobuf files
@@ -247,7 +319,9 @@ proto-clean: ## Remove generated protobuf files
 
 fmt-engine: ## Format C++ source files (requires clang-format)
 	@echo "🎨 Formatting C++ sources..."
-	@find $(L1_DIR)/src $(L1_DIR)/include -name '*.cpp' -o -name '*.hpp' | 		xargs clang-format -i -style=file 2>/dev/null || 		echo "⚠️  clang-format not installed. Run: brew install clang-format"
+	@find $(L1_DIR)/src $(L1_DIR)/include -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) | \
+		xargs clang-format -i -style=file 2>/dev/null || \
+		echo "⚠️  clang-format not installed."
 
 clean-all: clean-engine ## Clean everything (builds + Python envs)
 	@echo "🧹 Cleaning Python environments..."

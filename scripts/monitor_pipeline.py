@@ -33,7 +33,7 @@ except Exception:
 # Protobuf import
 try:
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "data-pipeline", "fusion"))
-    from ctt_messages_pb2 import MindsetPerturbation
+    from ctt_messages_pb2 import MindsetPerturbation # type: ignore
 except ImportError:
     MindsetPerturbation = None
 

@@ -23,13 +23,23 @@ from settings import config
 class RetryExhaustedError(Exception):
     pass
 
-def with_retries(max_attempts: int = 3, backoff_base: float = 1.5):
+def with_retries(max_attempts: int = 3, backoff_base: float = 1.5, retry_404: bool = False):
+    """Retry decorator. Set retry_404=True to retry on 404 (rarely needed)."""
     def decorator(func):
         def wrapper(*args, **kwargs):
             last_exc = None
             for attempt in range(1, max_attempts + 1):
                 try:
                     return func(*args, **kwargs)
+                except requests.HTTPError as e:
+                    if not retry_404 and e.response.status_code == 404:
+                        raise  # Don't retry 404s — resource doesn't exist
+                    last_exc = e
+                    sleep_time = backoff_base ** attempt
+                    print(f"   ⚠️  {func.__name__} attempt {attempt}/{max_attempts} failed: {e}")
+                    if attempt < max_attempts:
+                        print(f"      Retrying in {sleep_time:.1f}s...")
+                        time.sleep(sleep_time)
                 except (requests.RequestException, ConnectionError) as e:
                     last_exc = e
                     sleep_time = backoff_base ** attempt
@@ -186,34 +196,43 @@ class BatClient:
     """
     Buses & Trains API client.
     Auth: Authorization: Bearer <api_key>
-    The API key should include the 'bat_' prefix if your account provides it that way.
     """
+    # Known-valid UK rail CRS codes (3-letter)
+    DEFAULT_RAIL_STATIONS = [
+        "PAD", "EUS", "KGX", "MYB", "BHM", "MAN", "EDB", "GLQ",
+        "LDS", "YRK", "NCL", "BRI", "CDF", "SWI", "OXF", "CAM",
+        "LST", "LBG", "VIC", "WAT", "CHX", "CST", "FPK", "BFR",
+    ]
+
     def __init__(self, api_key: str, base_url: str = "https://api.busesandtrains.co.uk"):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
-        # Ensure the key has the bat_ prefix
         self._bearer_token = api_key if api_key.startswith("bat_") else f"bat_{api_key}"
         self.session.headers.update({
             "Authorization": f"Bearer {self._bearer_token}",
             "Accept": "application/json",
         })
-        # Debug: show key prefix (never log full key)
         key_preview = self._bearer_token[:12] + "..." if len(self._bearer_token) > 12 else self._bearer_token
         print(f"   🔑 Auth: Bearer {key_preview}")
 
     @with_retries(max_attempts=2, backoff_base=1.5)
-    def search_stops(self, lat: float, lon: float, radius: int = 2000, limit: int = 10) -> list[dict]:
+    def search_stops(self, query: str, limit: int = 5) -> list[dict]:
+        """Search for bus stops by name to get valid ATCO codes."""
         url = f"{self.base_url}/v1/stops"
-        params = {"lat": lat, "lon": lon, "radius": radius, "limit": limit}
+        params = {"q": query, "limit": limit}
         resp = self.session.get(url, params=params, timeout=10)
         resp.raise_for_status()
         return resp.json().get("stops", [])
 
-    @with_retries(max_attempts=2, backoff_base=1.5)
+    @with_retries(max_attempts=2, backoff_base=1.5, retry_404=False)
     def fetch_bus_departures(self, atco_code: str) -> list[dict]:
+        """Fetch live bus departures for a stop. Returns delay records."""
         url = f"{self.base_url}/v1/stops/{atco_code}/departures"
         resp = self.session.get(url, timeout=10)
+        if resp.status_code == 404:
+            print(f"   ⚠️  Stop {atco_code} not found (404)")
+            return []
         resp.raise_for_status()
         data = resp.json()
         delays = []
@@ -242,10 +261,14 @@ class BatClient:
                 continue
         return delays
 
-    @with_retries(max_attempts=2, backoff_base=1.5)
+    @with_retries(max_attempts=2, backoff_base=1.5, retry_404=False)
     def fetch_rail_departures(self, crs: str) -> list[dict]:
+        """Fetch live rail departures for a station CRS code."""
         url = f"{self.base_url}/v1/rail/stations/{crs}/departures"
         resp = self.session.get(url, timeout=10)
+        if resp.status_code == 404:
+            print(f"   ⚠️  Station {crs} not found (404)")
+            return []
         resp.raise_for_status()
         data = resp.json()
         delays = []
@@ -282,17 +305,20 @@ class BatClient:
     def fetch_all_delays(self, bus_stops: list[str] = None, rail_stations: list[str] = None) -> list[dict]:
         delays = []
         bus_stops = bus_stops or []
-        rail_stations = rail_stations or ["PAD", "EUS", "KGX", "MYB", "BHM", "MAN", "EDB", "GLQ"]
+        rail_stations = rail_stations or self.DEFAULT_RAIL_STATIONS
+
         for atco in bus_stops:
             try:
                 delays.extend(self.fetch_bus_departures(atco))
             except Exception as e:
                 print(f"   ⚠️  Bus stop {atco} failed: {e}")
+
         for crs in rail_stations:
             try:
                 delays.extend(self.fetch_rail_departures(crs))
             except Exception as e:
                 print(f"   ⚠️  Rail station {crs} failed: {e}")
+
         return delays
 
 # ---------------------------------------------------------------------------
@@ -618,9 +644,6 @@ def run_gtfs_harvester(mode: str = "mock"):
         return
 
     elif mode == "bat":
-        # ------------------------------------------------------------------
-        # BAT mode: Buses & Trains JSON API
-        # ------------------------------------------------------------------
         bat_client = BatClient(api_key=config.BAT_API_KEY, base_url=config.BAT_BASE_URL)
         print(f"   Backend: BAT ({config.BAT_BASE_URL})")
         print(f"   Coverage: UK bus + rail (JSON API)")
@@ -631,7 +654,8 @@ def run_gtfs_harvester(mode: str = "mock"):
         rail_stations_str = getattr(config, 'BAT_RAIL_STATIONS', '') or ''
         rail_stations = [s.strip() for s in rail_stations_str.split(',') if s.strip()]
         if not bus_stops and not rail_stations:
-            rail_stations = ["PAD", "EUS", "KGX", "MYB", "BHM", "MAN", "EDB", "GLQ"]
+            rail_stations = bat_client.DEFAULT_RAIL_STATIONS
+            print(f"   Using default rail stations: {', '.join(rail_stations[:8])}...")
 
         cycle = 0
         try:

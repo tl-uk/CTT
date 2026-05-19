@@ -1,8 +1,3 @@
-# =============================================================================
-# CTT Phase 5 — Full Stack Orchestration
-# Usage: docker compose up --build
-# =============================================================================
-
 services:
   engine:
     build:
@@ -37,9 +32,6 @@ services:
       - CTT_INTERPRETER_HOST=interpreter
     networks:
       - ctt
-    depends_on:
-      interpreter:
-        condition: service_started
 
   interpreter:
     build:
@@ -52,9 +44,6 @@ services:
       - CTT_FUSION_HOST=fusion
     networks:
       - ctt
-    depends_on:
-      fusion:
-        condition: service_started
 
   fusion:
     build:
@@ -67,9 +56,6 @@ services:
       - CTT_L1_ENGINE_HOST=engine
     networks:
       - ctt
-    depends_on:
-      engine:
-        condition: service_healthy
 
   dashboard:
     build:
@@ -80,12 +66,20 @@ services:
       - "5000:5000"
     environment:
       - CTT_L1_ENGINE_HOST=engine
+      - CTT_FUSION_HOST=fusion
     networks:
       - ctt
-    depends_on:
-      engine:
-        condition: service_healthy
 
 networks:
   ctt:
     driver: bridge
+
+grafana:
+  image: grafana/grafana:latest
+  ports:
+    - "3000:3000"
+  environment:
+    - GF_SECURITY_ADMIN_PASSWORD=admin
+  volumes:
+    - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+    - ./grafana/datasources:/etc/grafana/provisioning/datasources

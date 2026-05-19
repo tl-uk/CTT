@@ -70,10 +70,6 @@ services:
     networks:
       - ctt
 
-networks:
-  ctt:
-    driver: bridge
-
 grafana:
   image: grafana/grafana:latest
   ports:
@@ -83,3 +79,7 @@ grafana:
   volumes:
     - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
     - ./grafana/datasources:/etc/grafana/provisioning/datasources
+
+networks:
+  ctt:
+    driver: bridge

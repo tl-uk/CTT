@@ -13,7 +13,9 @@ INCLUDE_PATTERNS = {
     ".py", ".cpp", ".hpp", ".h", ".proto", ".md",
     "CMakeLists.txt", "Makefile", "requirements.txt",
     ".yaml", ".yml", ".json", ".env",
+    "Dockerfile",  # <-- ADDED: bare filename, no extension
 }
+
 # What to exclude
 EXCLUDE_DIRS = {".git", ".venv", "build", "__pycache__", ".pytest_cache", "node_modules", ".idea", ".vscode"}
 
@@ -21,6 +23,7 @@ def should_include(path: Path) -> bool:
     if path.is_dir():
         # Include dir if it has descendants we care about
         return any(should_include(p) for p in path.iterdir() if p.name not in EXCLUDE_DIRS)
+    # FIXED: Check full filename (for Dockerfile, Makefile, etc.) AND suffix
     return path.name in INCLUDE_PATTERNS or path.suffix in INCLUDE_PATTERNS
 
 def build_tree(path: Path, prefix: str = "", is_last: bool = True) -> str:

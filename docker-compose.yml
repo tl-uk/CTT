@@ -1,3 +1,1 @@
-# CTT/docker-compose.yml — delegates to deploy/
-include:
-  - deploy/docker-compose.yml
+deploy/docker-compose.yml

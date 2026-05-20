@@ -25,13 +25,13 @@ services/l1-engine/build/
 .DS_Store
 Thumbs.db
 
-# Docker itself
+# Docker
 deploy/
 docker-compose.yml
 Dockerfile*
 .dockerignore
 
-# Documentation
+# Docs
 *.md
 *.pdf
 
@@ -46,5 +46,5 @@ data/
 *.tar
 *.tar.gz
 
-# Node (if any frontend later)
+# Node
 node_modules/

@@ -126,3 +126,23 @@ Terminal 1
 Terminal 2
 source .venv/bin/activate
 python test_bridge.py
+
+------
+Cross-Platform Build Commands for Docker
+
+# Build for local Apple Silicon
+docker build -f services/l1-engine/Dockerfile -t ctt-engine:arm64 .
+
+# Build for Intel/AMD cloud deployment
+docker build --platform=linux/amd64 -f services/l1-engine/Dockerfile -t ctt-engine:amd64 .
+
+# Multi-platform manifest (push to registry)
+# Create a builder instance that supports multi-platform
+docker buildx create --use --name ctt-builder
+
+# Build and push both architectures
+docker buildx build \
+    --platform linux/amd64,linux/arm64 \
+    -f services/l1-engine/Dockerfile \
+    -t your-registry/ctt-engine:latest \
+    --push .

@@ -5,14 +5,41 @@ Semantic Interpreter: Maps raw harvester data to CTT Mindset perturbations.
 Handles both SME format (efficiency_score) and GTFS format (impact/delay_minutes).
 """
 import json
-import time  # FIXED: moved to top-level (was trapped inside __main__)
+import time
 import zmq
 import sys
 import os
+import threading
+import http.server
+import socketserver
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "config"))
 from ports import ZMQ_PORTS
 
+# -----------------------------------------------------------------------------
+# Healthcheck HTTP server
+# -----------------------------------------------------------------------------
+class HealthHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok","role":"interpreter"}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass
+
+def start_health_server(port=8080):
+    with socketserver.TCPServer(("", port), HealthHandler) as httpd:
+        httpd.serve_forever()
+
+# -----------------------------------------------------------------------------
+# Pressure calculation
+# -----------------------------------------------------------------------------
 def calculate_pressure(raw_data: dict) -> float:
     """
     Convert raw data to adversarial pressure (0-100 scale).
@@ -34,21 +61,26 @@ def calculate_pressure(raw_data: dict) -> float:
 
     return 50.0
 
+# -----------------------------------------------------------------------------
+# Main Interpreter Loop
+# -----------------------------------------------------------------------------
 def run_semantic_interpreter():
     context = zmq.Context()
 
     # Input: raw data from Harvester
     sub = context.socket(zmq.SUB)
-    sub.connect(ZMQ_PORTS["HARVESTER_SUB"])
+    harvester_addr = ZMQ_PORTS.get("HARVESTER_SUB", "tcp://localhost:5560")
+    sub.connect(harvester_addr)
     sub.setsockopt_string(zmq.SUBSCRIBE, "")
 
     # Output: interpreted data to Fusion
     pub = context.socket(zmq.PUB)
-    pub.bind(ZMQ_PORTS["INTERPRETER_PUB"])
+    bind_addr = ZMQ_PORTS.get("INTERPRETER_PUB", "tcp://*:5561")
+    pub.bind(bind_addr)
 
     print("🧠 Semantic Interpreter Online")
-    print(f"   Input:  {ZMQ_PORTS['HARVESTER_SUB']}")
-    print(f"   Output: {ZMQ_PORTS['INTERPRETER_PUB']}")
+    print(f"   Input:  {harvester_addr}")
+    print(f"   Output: {bind_addr}")
     print("   Logic:  pressure = (1.0 - efficiency) * 100  |  or delay * 1.5")
 
     # Slow-joiner guard
@@ -80,4 +112,8 @@ def run_semantic_interpreter():
         print(f"   → {truck_id:20s} | pressure={pressure:5.1f} | route={interpreted['route']}")
 
 if __name__ == "__main__":
+    health_thread = threading.Thread(target=start_health_server, args=(8080,), daemon=True)
+    health_thread.start()
+    print("[Interpreter] Healthcheck server on :8080")
+
     run_semantic_interpreter()

@@ -62,9 +62,13 @@ class TelemetryCollector:
         self.latest_states: dict[str, AgentState] = {}
         self._running = False
         self._thread = None
+        self._last_message_time: float = 0.0
+        self._message_count: int = 0
 
     def start(self):
         import threading
+        if self._running:
+            return
         self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -72,13 +76,28 @@ class TelemetryCollector:
     def _run(self):
         ctx = zmq.Context()
         sub = ctx.socket(zmq.SUB)
-        sub.connect(ZMQ_PORTS["L1_TELEMETRY_SUB"])
+
+        # Connect to engine telemetry with retry
+        telemetry_addr = ZMQ_PORTS.get("L1_TELEMETRY_SUB", "tcp://localhost:5555")
+        max_retries = 10
+        for attempt in range(max_retries):
+            try:
+                sub.connect(telemetry_addr)
+                break
+            except zmq.ZMQError:
+                print(f"[Dashboard] Telemetry connect attempt {attempt+1}/{max_retries} failed, retrying...")
+                time.sleep(1)
+
         sub.setsockopt_string(zmq.SUBSCRIBE, "")
         sub.set(zmq.RCVTIMEO, 2000)
+
+        print(f"[Dashboard] Telemetry subscriber connected to {telemetry_addr}")
 
         while self._running:
             try:
                 msg = sub.recv()
+                self._last_message_time = time.time()
+                self._message_count += 1
                 data = json.loads(msg.decode("utf-8"))
                 if isinstance(data, list):
                     for agent in data:
@@ -100,7 +119,7 @@ class TelemetryCollector:
             except zmq.error.Again:
                 continue
             except Exception as e:
-                print(f"Telemetry error: {e}")
+                print(f"[Dashboard] Telemetry error: {e}")
 
         sub.close()
         ctx.term()
@@ -118,6 +137,12 @@ class TelemetryCollector:
 
     def get_agent_names(self) -> list[str]:
         return list(self.latest_states.keys())
+
+    def is_healthy(self) -> bool:
+        """Check if telemetry is flowing (received message within last 10s)."""
+        if self._message_count == 0:
+            return False
+        return (time.time() - self._last_message_time) < 10.0
 
 
 # =============================================================================
@@ -145,7 +170,6 @@ class ScenarioEngine:
     def simulate(self, scenario_id: str) -> Optional[dict]:
         for sc in self.scenarios:
             if sc.scenario_id == scenario_id:
-                # Simple HDS simulation: predict pressure change based on parameter delta
                 baseline = self.collector.latest_states
                 predicted = {}
                 for agent_name, state in baseline.items():
@@ -154,7 +178,7 @@ class ScenarioEngine:
                     predicted[agent_name] = {
                         "current_pressure": state.adversarial_pressure,
                         "predicted_pressure": new_pressure,
-                        "would_decarbonize": new_pressure >= 15.0  # threshold from SimulationEngine
+                        "would_decarbonize": new_pressure >= 15.0
                     }
                 sc.predicted_outcome = predicted
                 sc.status = "simulated"
@@ -223,15 +247,19 @@ def health():
     return jsonify({
         "status": "ok",
         "agents_online": len(collector.latest_states),
-        "telemetry_messages": len(collector.buffer)
+        "telemetry_messages": collector._message_count,
+        "telemetry_flowing": collector.is_healthy(),
+        "agent_names": collector.get_agent_names()
     })
 
 
 @app.route("/api/v1/agents")
 def list_agents():
+    agents = collector.get_latest()
     return jsonify({
-        "agents": collector.get_latest(),
-        "count": len(collector.latest_states)
+        "agents": agents,
+        "count": len(agents),
+        "timestamp": time.time()
     })
 
 

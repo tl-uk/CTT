@@ -7,6 +7,7 @@ Verifies data flows: Harvester → Interpreter → Fusion → Engine → Telemet
 
 Usage:
     python scripts/observe_pipeline.py [--duration 30]
+    python scripts/observe_pipeline.py --mode docker [--duration 60]
 """
 import json
 import time
@@ -44,8 +45,9 @@ def format_pressure(p) -> str:
 # Observer
 # ---------------------------------------------------------------------------
 class PipelineObserver:
-    def __init__(self, duration: int = 30):
+    def __init__(self, duration: int = 30, mode: str = "native"):
         self.duration = duration
+        self.mode = mode
         self.telemetry_log: deque[dict] = deque(maxlen=100)
         self.harvester_log: deque[dict] = deque(maxlen=100)
         self.interpreter_log: deque[dict] = deque(maxlen=100)
@@ -135,6 +137,19 @@ class PipelineObserver:
         sub.close()
         ctx.term()
 
+    def check_docker_health(self):
+        """Check Docker container health statuses."""
+        print("🔍 Docker Container Health:")
+        services = ["engine", "harvester", "interpreter", "fusion", "dashboard"]
+        for svc in services:
+            result = subprocess.run(
+                ["docker", "inspect", "--format", "{{.State.Health.Status}}", f"ctt-{svc}"],
+                capture_output=True, text=True
+            )
+            status = result.stdout.strip() if result.returncode == 0 else "not found"
+            icon = "✅" if status == "healthy" else "⬜" if status in ("starting", "") else "❌"
+            print(f"   {icon} ctt-{svc}: {status}")
+
     def run(self):
         import threading
 
@@ -146,6 +161,10 @@ class PipelineObserver:
         print(f"   Harvester:   {HARVESTER_SUB}")
         print(f"   Interpreter: {INTERPRETER_SUB}")
         print()
+
+        if self.mode == "docker":
+            self.check_docker_health()
+            print()
 
         # Check ports
         print("🔍 Port Health:")
@@ -259,7 +278,8 @@ class PipelineObserver:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CTT Pipeline Observer")
     parser.add_argument("--duration", type=int, default=30, help="Observation duration in seconds")
+    parser.add_argument("--mode", choices=["native", "docker"], default="native", help="Observer mode")
     args = parser.parse_args()
 
-    observer = PipelineObserver(duration=args.duration)
+    observer = PipelineObserver(duration=args.duration, mode=args.mode)
     observer.run()

@@ -12,6 +12,9 @@ import sys
 import os
 import json
 import time
+import threading
+import http.server
+import socketserver
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "config"))
 from ports import ZMQ_PORTS
@@ -23,24 +26,49 @@ except ImportError:
     print("❌ ctt_messages_pb2.py not found. Run: make proto")
     raise
 
+# -----------------------------------------------------------------------------
+# Healthcheck HTTP server (for Docker healthcheck)
+# -----------------------------------------------------------------------------
+class HealthHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok","role":"fusion"}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass  # Suppress healthcheck noise
+
+def start_health_server(port=8080):
+    with socketserver.TCPServer(("", port), HealthHandler) as httpd:
+        httpd.serve_forever()
+
+# -----------------------------------------------------------------------------
+# Main Fusion Loop
+# -----------------------------------------------------------------------------
 def run_fusion():
     context = zmq.Context()
 
     # Input: interpreted data from Semantic Agent
     sub = context.socket(zmq.SUB)
-    sub.connect(ZMQ_PORTS["INTERPRETER_SUB"])
+    interpreter_addr = ZMQ_PORTS.get("INTERPRETER_SUB", "tcp://localhost:5561")
+    sub.connect(interpreter_addr)
     sub.setsockopt_string(zmq.SUBSCRIBE, "")
 
     # Output: Protobuf perturbations to L1 Engine
     l1_control = context.socket(zmq.PUB)
-    l1_control.bind(ZMQ_PORTS["L1_PERTURBATION_PUB"])
+    bind_addr = ZMQ_PORTS.get("L1_PERTURBATION_PUB", "tcp://*:5556")
+    l1_control.bind(bind_addr)
 
     print("⚡ Fusion Engine Online (Protobuf mode)")
-    print(f"   Input:  {ZMQ_PORTS['INTERPRETER_SUB']}")
-    print(f"   Output: {ZMQ_PORTS['L1_PERTURBATION_PUB']}  ← BIND (C++ connects here)")
+    print(f"   Input:  {interpreter_addr}")
+    print(f"   Output: {bind_addr}  ← BIND (C++ connects here)")
 
-    # Slow-joiner guard: in container networks 0.5s is usually sufficient,
-    # but ZMQ connections are async. Sleep allows peers to handshake.
+    # Slow-joiner guard
     time.sleep(0.5)
 
     while True:
@@ -64,4 +92,9 @@ def run_fusion():
         print(f"   → Protobuf sent | agent={p.agent_uuid} | delta={p.pressure_delta:.1f} | bytes={len(serialized)}")
 
 if __name__ == "__main__":
+    # Start healthcheck server in background thread
+    health_thread = threading.Thread(target=start_health_server, args=(8080,), daemon=True)
+    health_thread.start()
+    print("[Fusion] Healthcheck server on :8080")
+
     run_fusion()

@@ -1,35 +1,106 @@
 {
   "dashboard": {
     "id": null,
+    "uid": "ctt-twin-001",
     "title": "CTT Digital Twin",
     "tags": ["ctt", "twin", "hds"],
     "timezone": "browser",
+    "schemaVersion": 36,
+    "refresh": "5s",
     "panels": [
       {
         "id": 1,
         "title": "Fleet Status",
         "type": "table",
+        "datasource": "CTT Dashboard API",
         "targets": [
           {
-            "datasource": "CTT Dashboard API",
+            "refId": "A",
             "urlPath": "/agents",
             "queryParams": ""
           }
         ],
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+        "gridPos": {"h": 10, "w": 12, "x": 0, "y": 0},
+        "fieldConfig": {
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "is_decarbonized"},
+              "properties": [
+                {
+                  "id": "mappings",
+                  "value": [
+                    {"options": {"false": {"color": "red", "index": 0, "text": "LEGACY"}}, "type": "value"},
+                    {"options": {"true": {"color": "green", "index": 1, "text": "GREEN"}}, "type": "value"}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
       },
       {
         "id": 2,
         "title": "Adversarial Pressure",
         "type": "timeseries",
+        "datasource": "CTT Dashboard API",
         "targets": [
           {
-            "datasource": "CTT Dashboard API",
+            "refId": "A",
             "urlPath": "/agents/Volvo_eHGV_001/history?limit=50",
             "queryParams": ""
           }
         ],
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+        "gridPos": {"h": 10, "w": 12, "x": 12, "y": 0},
+        "fieldConfig": {
+          "defaults": {
+            "custom": {"drawStyle": "line", "lineWidth": 2}
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Fleet Decarbonization Rate",
+        "type": "stat",
+        "datasource": "CTT Dashboard API",
+        "targets": [
+          {
+            "refId": "A",
+            "urlPath": "/agents",
+            "queryParams": ""
+          }
+        ],
+        "gridPos": {"h": 5, "w": 6, "x": 0, "y": 10},
+        "options": {
+          "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""}
+        }
+      },
+      {
+        "id": 4,
+        "title": "Energy Levels",
+        "type": "gauge",
+        "datasource": "CTT Dashboard API",
+        "targets": [
+          {
+            "refId": "A",
+            "urlPath": "/agents",
+            "queryParams": ""
+          }
+        ],
+        "gridPos": {"h": 5, "w": 6, "x": 6, "y": 10},
+        "fieldConfig": {
+          "defaults": {
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 20},
+                {"color": "green", "value": 50}
+              ]
+            }
+          }
+        }
       }
     ]
   }

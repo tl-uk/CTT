@@ -1,11 +1,12 @@
 # CTT Project Structure
 
-**Generated:** Wed May 20 12:15:28 BST 2026
+**Generated:** Wed May 20 22:03:36 BST 2026
 
 ```
 └── CTT
     ├── .env
     ├── Makefile
+    ├── PROJECT_TREE.md
     ├── api
     │   └── proto
     │       └── ctt_messages.proto
@@ -59,8 +60,10 @@
         │       ├── DataBridge.cpp
         │       ├── SimulationEngine.cpp
         │       └── main.cpp
-        └── l2-bridge
-            ├── Dockerfile
-            ├── dashboard.py
+        ├── l2-bridge
+        │   ├── Dockerfile
+        │   ├── dashboard.py
+        │   └── requirements.txt
+        └── l3-analytics
             └── requirements.txt
 ```

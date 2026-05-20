@@ -9,6 +9,5 @@ datasources:
     editable: true
     jsonData:
       queryParams: ""
-      httpHeaderName1: "Content-Type"
     secureJsonData:
       httpHeaderValue1: "application/json"

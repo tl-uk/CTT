@@ -1,15 +1,8 @@
 # =============================================================================
 # CTT L1 Engine — Multi-Platform Debian-based build
-# Supports: linux/arm64 (Apple Silicon), linux/amd64 (Intel/AMD cloud)
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# Build stage
-# -----------------------------------------------------------------------------
 FROM debian:bookworm-slim AS builder
-
-ARG TARGETARCH
-ARG BUILDARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -32,11 +25,9 @@ COPY Makefile ./
 RUN make build-engine
 
 # -----------------------------------------------------------------------------
-# Runtime stage
+# Runtime stage with library verification
 # -----------------------------------------------------------------------------
 FROM debian:bookworm-slim
-
-ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libzmq5 \
@@ -44,13 +35,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user for security
+# Create non-root user
 RUN useradd --create-home --shell /bin/bash ctt_user
 USER ctt_user
-
 WORKDIR /app
 
-COPY --from=builder /build/services/l1-engine/build/CTT_Engine /usr/local/bin/CTT_Engine
+COPY --from=builder --chown=ctt_user:ctt_user /build/services/l1-engine/build/CTT_Engine /usr/local/bin/CTT_Engine
+
+# Verify binary and libraries before running
+RUN test -x /usr/local/bin/CTT_Engine && \
+    ldd /usr/local/bin/CTT_Engine | grep -q "libzmq" && \
+    ldd /usr/local/bin/CTT_Engine | grep -q "libprotobuf" && \
+    echo "Binary verified"
 
 EXPOSE 5555/tcp
 EXPOSE 5556/tcp

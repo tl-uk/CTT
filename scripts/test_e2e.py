@@ -6,16 +6,19 @@ End-to-end pipeline verification for CTT.
 
 Modes:
   --mode standalone : Starts interpreter + fusion, acts as harvester, verifies via telemetry
+  --mode docker     : Assumes stack is running in Docker; verifies all services
   --mode inject     : Assumes all components running; just injects test payloads
 
 This test verifies:
   1. Data flows: harvester → interpreter → fusion → C++ engine
   2. C++ engine applies perturbations (observed via telemetry on 5555)
-  3. No port conflicts or ZMQ topology errors
+  3. Dashboard API serves agent data
+  4. No port conflicts or ZMQ topology errors
 
 Usage:
   Terminal 1: make run-engine
   Terminal 2: python scripts/test_e2e.py --mode standalone
+  Or (Docker): python scripts/test_e2e.py --mode docker
 """
 import argparse
 import json
@@ -25,6 +28,7 @@ import sys
 import time
 import signal
 import zmq
+import requests
 
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "config"))
@@ -59,6 +63,98 @@ def kill_processes(procs):
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+
+def check_docker_services():
+    """Check if Docker Compose services are healthy."""
+    print("\n🔍 Checking Docker Compose services...")
+    try:
+        result = subprocess.run(
+            ["docker-compose", "-f", "deploy/docker-compose.yml", "ps", "-q"],
+            capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(__file__))
+        )
+        if not result.stdout.strip():
+            print("❌ No Docker containers running. Run 'docker-compose up -d' first.")
+            return False
+
+        # Check health of each service
+        services = ["engine", "harvester", "interpreter", "fusion", "dashboard"]
+        all_healthy = True
+        for svc in services:
+            health = subprocess.run(
+                ["docker", "inspect", "--format", "{{.State.Health.Status}}", f"ctt-{svc}"],
+                capture_output=True, text=True
+            )
+            status = health.stdout.strip() if health.returncode == 0 else "unknown"
+            icon = "✅" if status == "healthy" else "⬜" if status in ("starting", "") else "❌"
+            print(f"   {icon} ctt-{svc}: {status}")
+            if status not in ("healthy", "starting", ""):
+                all_healthy = False
+
+        return all_healthy
+    except FileNotFoundError:
+        print("❌ docker-compose not found in PATH")
+        return False
+
+def run_docker_test():
+    """Test against running Docker stack."""
+    print("=" * 70)
+    print("CTT End-to-End Pipeline Test (Docker Mode)")
+    print("=" * 70)
+
+    if not check_docker_services():
+        print("\n⚠️  Some services not healthy — continuing with available checks...")
+
+    # Check dashboard API
+    print("\n🔍 Check 1: Dashboard API")
+    try:
+        resp = requests.get("http://localhost:5000/health", timeout=5)
+        if resp.status_code == 200:
+            health = resp.json()
+            print(f"   ✅ Dashboard healthy: {health}")
+        else:
+            print(f"   ❌ Dashboard returned {resp.status_code}")
+    except Exception as e:
+        print(f"   ❌ Dashboard unreachable: {e}")
+
+    # Check telemetry
+    print("\n🔍 Check 2: Engine Telemetry")
+    context = zmq.Context()
+    sub = context.socket(zmq.SUB)
+    sub.connect("tcp://localhost:5555")
+    sub.set(zmq.SUBSCRIBE, b"")
+    sub.set(zmq.RCVTIMEO, 5000)
+
+    try:
+        msg = sub.recv()
+        data = json.loads(msg.decode("utf-8"))
+        if isinstance(data, list) and len(data) > 0:
+            print(f"   ✅ Telemetry flowing: {len(data)} agents")
+            for a in data[:3]:
+                print(f"      • {a.get('entity_name', '?')}: pressure={a.get('adversarial_pressure', '?')}, mode={a.get('mode', '?')}")
+        else:
+            print(f"   ⚠️  Telemetry received but empty or malformed")
+    except zmq.error.Again:
+        print("   ❌ No telemetry received — engine may be down")
+    except Exception as e:
+        print(f"   ❌ Telemetry error: {e}")
+    finally:
+        sub.close()
+        context.term()
+
+    # Check Grafana
+    print("\n🔍 Check 3: Grafana")
+    try:
+        resp = requests.get("http://localhost:3000/api/health", timeout=5, auth=("admin", "ctt-admin-2026"))
+        if resp.status_code == 200:
+            print(f"   ✅ Grafana healthy: {resp.json()}")
+        else:
+            print(f"   ⚠️  Grafana returned {resp.status_code}")
+    except Exception as e:
+        print(f"   ⚠️  Grafana unreachable: {e}")
+
+    print("\n" + "=" * 70)
+    print("Docker test complete. Review logs above.")
+    print("=" * 70)
 
 def run_standalone_test():
     """Full test: start pipeline components, inject data, verify via telemetry."""
@@ -121,7 +217,7 @@ def run_standalone_test():
         telemetry_sub.connect(ZMQ_PORTS["L1_TELEMETRY_SUB"])
         telemetry_sub.setsockopt_string(zmq.SUBSCRIBE, "")
 
-        # ZMQ slow-joiner: allow connections to establish
+        # ZMQ slow-joiner
         time.sleep(1.0)
 
         print("\n📡 Sending test payloads through pipeline...")
@@ -135,7 +231,7 @@ def run_standalone_test():
 
             harvester_pub.send_string(json.dumps(payload))
             print(f"{i:>3} | {payload['truck_id']:20s} | {payload['efficiency_score']:>10.2f} | {expected_pressure:>12.1f}")
-            time.sleep(1.5)  # Allow pipeline processing + engine tick
+            time.sleep(1.5)
 
         print("\n⏳ Waiting for telemetry feedback (up to 5s)...")
 
@@ -152,7 +248,6 @@ def run_standalone_test():
                     for agent in data:
                         agent_states[agent.get("entity_name", "unknown")] = agent
                     telemetry_found = True
-                    # Check if we see our test agents with non-zero pressure
                     break
             except zmq.Again:
                 time.sleep(0.1)
@@ -172,7 +267,7 @@ def run_standalone_test():
             print("✅ Telemetry received from C++ engine")
             print(f"   Agents in world: {list(agent_states.keys())}")
 
-            # Check if Volvo_eHGV_001 (the C++ test fleet agent) has pressure > 0
+            # Check if Volvo_eHGV_001 has pressure > 0
             volvo = agent_states.get("Volvo_eHGV_001", {})
             pressure = volvo.get("adversarial_pressure", 0)
 
@@ -183,15 +278,6 @@ def run_standalone_test():
                 print(f"❌ Perturbation NOT APPLIED — Volvo_eHGV_001 pressure = {pressure:.1f}")
                 print("   The pipeline delivered data but the C++ engine may not have parsed Protobuf.")
                 success = False
-
-        # Print component logs for diagnosis
-        print("\n--- Interpreter Log ---")
-        interpreter.stdout.close()
-        print("(see process output)")
-
-        print("\n--- Fusion Log ---")
-        fusion.stdout.close()
-        print("(see process output)")
 
         harvester_pub.close()
         telemetry_sub.close()
@@ -232,11 +318,13 @@ def run_inject_test():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CTT End-to-End Pipeline Test")
-    parser.add_argument("--mode", choices=["standalone", "inject"], default="standalone",
-                        help="standalone: full test with subprocesses | inject: just send data")
+    parser.add_argument("--mode", choices=["standalone", "docker", "inject"], default="standalone",
+                        help="standalone: full test with subprocesses | docker: test running stack | inject: just send data")
     args = parser.parse_args()
 
     if args.mode == "standalone":
         run_standalone_test()
+    elif args.mode == "docker":
+        run_docker_test()
     else:
         run_inject_test()

@@ -1,6 +1,6 @@
 # =============================================================================
 # CTT Phase 5 — Production Stack Orchestration
-# Location: CTT/deploy/docker-compose.yml
+# Location: deploy/docker-compose.yml
 # Usage: docker-compose -f deploy/docker-compose.yml up --build
 # =============================================================================
 
@@ -13,8 +13,7 @@ services:
     ports:
       - "5555:5555"
       - "27750:27750"
-    expose:
-      - "5556"
+    # 5556 is used internally (engine SUB connects to fusion PUB)
     environment:
       - CTT_L1_ENGINE_HOST=engine
       - CTT_FUSION_HOST=fusion
@@ -24,6 +23,7 @@ services:
       test: ["CMD", "nc", "-z", "localhost", "5555"]
       interval: 5s
       timeout: 2s
+      start_period: 15s
       retries: 5
     restart: unless-stopped
 
@@ -39,6 +39,11 @@ services:
       - CTT_INTERPRETER_HOST=interpreter
     networks:
       - ctt
+    healthcheck:
+      test: ["CMD-SHELL", "python -c "import zmq; ctx=zmq.Context(); s=ctx.socket(zmq.PUB); s.bind('tcp://127.0.0.1:5560'); s.close(); ctx.term()" || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     restart: unless-stopped
 
   interpreter:
@@ -52,6 +57,11 @@ services:
       - CTT_FUSION_HOST=fusion
     networks:
       - ctt
+    healthcheck:
+      test: ["CMD-SHELL", "python -c "import zmq; ctx=zmq.Context(); s=ctx.socket(zmq.PUB); s.bind('tcp://127.0.0.1:5561'); s.close(); ctx.term()" || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     restart: unless-stopped
 
   fusion:
@@ -59,12 +69,20 @@ services:
       context: ..
       dockerfile: services/data-pipeline/fusion/Dockerfile
     container_name: ctt-fusion
+    # Fusion BINDS PUB on 5556 — must be reachable by engine SUB
+    ports:
+      - "5556:5556"
     environment:
       - CTT_INTERPRETER_HOST=interpreter
       - CTT_FUSION_HOST=fusion
       - CTT_L1_ENGINE_HOST=engine
     networks:
       - ctt
+    healthcheck:
+      test: ["CMD-SHELL", "python -c "import zmq; ctx=zmq.Context(); s=ctx.socket(zmq.PUB); s.bind('tcp://127.0.0.1:5556'); s.close(); ctx.term()" || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     restart: unless-stopped
 
   dashboard:
@@ -79,6 +97,11 @@ services:
       - CTT_FUSION_HOST=fusion
     networks:
       - ctt
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
     restart: unless-stopped
 
   grafana:
@@ -89,6 +112,8 @@ services:
     environment:
       - GF_INSTALL_PLUGINS=marcusolsson-json-datasource
       - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=ctt-admin-2026
+      - GF_SERVER_ROOT_URL=http://localhost:3000
     volumes:
       - grafana_storage:/var/lib/grafana
       - ../deploy/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
@@ -96,7 +121,8 @@ services:
     networks:
       - ctt
     depends_on:
-      - dashboard
+      dashboard:
+        condition: service_healthy
     restart: unless-stopped
 
 networks:

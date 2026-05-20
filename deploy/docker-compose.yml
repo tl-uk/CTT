@@ -91,8 +91,8 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
     volumes:
       - grafana_storage:/var/lib/grafana
-      - ../grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ../grafana/datasources:/etc/grafana/provisioning/datasources
+      - ../deploy/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../deploy/grafana/datasources:/etc/grafana/provisioning/datasources:ro
     networks:
       - ctt
     depends_on:
@@ -105,3 +105,4 @@ networks:
 
 volumes:
   grafana_storage:
+    driver: local

@@ -1,13 +1,7 @@
-# =============================================================================
-# CTT Phase 5 — Production Stack Orchestration
-# Location: CTT/deploy/docker-compose.yml
-# Usage: docker compose -f deploy/docker-compose.yml up --build
-# =============================================================================
-
 services:
   engine:
     build:
-      context: ..
+      context: .
       dockerfile: services/l1-engine/Dockerfile
     container_name: ctt-engine
     ports:
@@ -28,7 +22,7 @@ services:
 
   harvester:
     build:
-      context: ..
+      context: .
       dockerfile: services/data-pipeline/ingestor/Dockerfile
     container_name: ctt-harvester
     environment:
@@ -41,7 +35,7 @@ services:
 
   interpreter:
     build:
-      context: ..
+      context: .
       dockerfile: services/data-pipeline/interpreter/Dockerfile
     container_name: ctt-interpreter
     environment:
@@ -53,7 +47,7 @@ services:
 
   fusion:
     build:
-      context: ..
+      context: .
       dockerfile: services/data-pipeline/fusion/Dockerfile
     container_name: ctt-fusion
     environment:
@@ -65,7 +59,7 @@ services:
 
   dashboard:
     build:
-      context: ..
+      context: .
       dockerfile: services/l2-bridge/Dockerfile
     container_name: ctt-dashboard
     ports:

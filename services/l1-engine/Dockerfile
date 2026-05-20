@@ -2,9 +2,6 @@
 # CTT L1 Engine — Debian-based build
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# Build stage
-# -----------------------------------------------------------------------------
 FROM debian:bookworm-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -21,13 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-COPY . .
+# Copy only what the C++ build needs
+COPY services/l1-engine/ ./services/l1-engine/
+COPY api/ ./api/
+COPY Makefile ./
 
 RUN make build-engine
 
-# -----------------------------------------------------------------------------
-# Runtime stage
-# -----------------------------------------------------------------------------
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

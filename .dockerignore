@@ -1,0 +1,50 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+services/l1-engine/build/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.mypy_cache/
+
+# Virtual environments
+**/.venv/
+**/venv/
+**/env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker itself
+deploy/
+docker-compose.yml
+Dockerfile*
+.dockerignore
+
+# Documentation
+*.md
+*.pdf
+
+# Logs
+*.log
+logs/
+tmp/
+
+# Data
+data/
+*.zip
+*.tar
+*.tar.gz
+
+# Node (if any frontend later)
+node_modules/

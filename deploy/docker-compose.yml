@@ -1,7 +1,13 @@
+# =============================================================================
+# CTT Phase 5 — Production Stack Orchestration
+# Location: CTT/deploy/docker-compose.yml
+# Usage: docker-compose -f deploy/docker-compose.yml up --build
+# =============================================================================
+
 services:
   engine:
     build:
-      context: .
+      context: ..
       dockerfile: services/l1-engine/Dockerfile
     container_name: ctt-engine
     ports:
@@ -19,10 +25,11 @@ services:
       interval: 5s
       timeout: 2s
       retries: 5
+    restart: unless-stopped
 
   harvester:
     build:
-      context: .
+      context: ..
       dockerfile: services/data-pipeline/ingestor/Dockerfile
     container_name: ctt-harvester
     environment:
@@ -32,10 +39,11 @@ services:
       - CTT_INTERPRETER_HOST=interpreter
     networks:
       - ctt
+    restart: unless-stopped
 
   interpreter:
     build:
-      context: .
+      context: ..
       dockerfile: services/data-pipeline/interpreter/Dockerfile
     container_name: ctt-interpreter
     environment:
@@ -44,10 +52,11 @@ services:
       - CTT_FUSION_HOST=fusion
     networks:
       - ctt
+    restart: unless-stopped
 
   fusion:
     build:
-      context: .
+      context: ..
       dockerfile: services/data-pipeline/fusion/Dockerfile
     container_name: ctt-fusion
     environment:
@@ -56,10 +65,11 @@ services:
       - CTT_L1_ENGINE_HOST=engine
     networks:
       - ctt
+    restart: unless-stopped
 
   dashboard:
     build:
-      context: .
+      context: ..
       dockerfile: services/l2-bridge/Dockerfile
     container_name: ctt-dashboard
     ports:
@@ -69,8 +79,9 @@ services:
       - CTT_FUSION_HOST=fusion
     networks:
       - ctt
+    restart: unless-stopped
 
-    grafana:
+  grafana:
     image: grafana/grafana:latest
     container_name: ctt-grafana
     ports:
@@ -78,20 +89,19 @@ services:
     environment:
       - GF_INSTALL_PLUGINS=marcusolsson-json-datasource
       - GF_SECURITY_ADMIN_USER=admin
-      # Do NOT set GF_SECURITY_ADMIN_PASSWORD here
     volumes:
       - grafana_storage:/var/lib/grafana
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - ../grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ../grafana/datasources:/etc/grafana/provisioning/datasources
     networks:
       - ctt
     depends_on:
       - dashboard
     restart: unless-stopped
 
-volumes:
-  grafana_storage:
-
 networks:
   ctt:
     driver: bridge
+
+volumes:
+  grafana_storage:

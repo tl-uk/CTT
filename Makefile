@@ -334,6 +334,43 @@ proto-clean: ## Remove generated protobuf files
 	@echo "🧹 Protobuf bindings cleaned"
 
 # =============================================================================
+# Docker Compose Targets
+# =============================================================================
+
+COMPOSE_FILE := deploy/docker-compose.yml
+
+docker-engine: ## Build L1 Engine Docker image
+	@which docker >/dev/null 2>&1 || { \
+		echo "❌ Docker not found. Install: brew install docker colima"; \
+		exit 1; \
+	}
+	@docker info >/dev/null 2>&1 || { \
+		echo "❌ Docker daemon not running. Run: colima start"; \
+		exit 1; \
+	}
+	@echo "🐳 Building L1 Engine Docker image..."
+	@docker build -f $(L1_DIR)/Dockerfile -t ctt-engine:latest .
+	@echo "✅ Docker image ctt-engine:latest built"
+
+compose-build: ## Build all services via docker-compose
+	@echo "🔨 Building CTT stack..."
+	@docker-compose -f $(COMPOSE_FILE) build
+
+compose-up: ## Start CTT stack in detached mode
+	@echo "🚀 Starting CTT stack..."
+	@docker-compose -f $(COMPOSE_FILE) up -d
+
+compose-down: ## Stop and remove CTT stack
+	@echo "🛑 Stopping CTT stack..."
+	@docker-compose -f $(COMPOSE_FILE) down
+
+compose-logs: ## Tail fusion logs
+	@docker-compose -f $(COMPOSE_FILE) logs -f fusion
+
+compose-ps: ## Show running services
+	@docker-compose -f $(COMPOSE_FILE) ps
+
+# =============================================================================
 # Global Utilities
 # =============================================================================
 

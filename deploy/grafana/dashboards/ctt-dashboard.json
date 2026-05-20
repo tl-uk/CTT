@@ -1,0 +1,36 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "CTT Digital Twin",
+    "tags": ["ctt", "twin", "hds"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Fleet Status",
+        "type": "table",
+        "targets": [
+          {
+            "datasource": "CTT Dashboard API",
+            "urlPath": "/agents",
+            "queryParams": ""
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Adversarial Pressure",
+        "type": "timeseries",
+        "targets": [
+          {
+            "datasource": "CTT Dashboard API",
+            "urlPath": "/agents/Volvo_eHGV_001/history?limit=50",
+            "queryParams": ""
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      }
+    ]
+  }
+}

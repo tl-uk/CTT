@@ -1,10 +1,29 @@
-tap "homebrew/core"
-tap "homebrew/bundle"
+# CTT Project — macOS Dependencies
+# Usage: brew bundle
 
-# System Dependencies
+# Core build tools
 brew "cmake"
-brew "zeromq"
-brew "cppzmq"
-brew "pkgconf"
+brew "ninja"
+brew "pkg-config"
+brew "git"
 
-# Note: nlohmann-json and flecs are handled by CMake FetchContent
+# C++ dependencies
+brew "zeromq"
+brew "protobuf"
+brew "grpc"
+
+# Python environment
+brew "python@3.13"
+brew "uv"
+
+# Docker / Container runtime (Colima instead of Docker Desktop)
+brew "colima"
+brew "docker"
+brew "docker-compose"
+
+# Optional: CLI utilities
+brew "jq"
+brew "ncat"
+
+# VS Code (optional, or use Cursor)
+cask "visual-studio-code" unless File.exist?("/Applications/Visual Studio Code.app")

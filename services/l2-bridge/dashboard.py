@@ -231,11 +231,10 @@ app = Flask(__name__)
 collector = TelemetryCollector()
 scenarios = ScenarioEngine(collector)
 
-
-@app.before_request
-def start_collector():
-    if collector._thread is None:
-        collector.start()
+# EAGER START: Start collector immediately at module load time
+# This ensures the healthcheck passes even before first HTTP request
+collector.start()
+print("[Dashboard] Telemetry collector started eagerly")
 
 
 # -----------------------------------------------------------------------------
@@ -365,5 +364,7 @@ def direct_perturb():
 # =============================================================================
 
 if __name__ == "__main__":
-    collector.start()
+    # Already started eagerly above, but ensure it's running
+    if not collector._running:
+        collector.start()
     app.run(host="0.0.0.0", port=5000, debug=False)

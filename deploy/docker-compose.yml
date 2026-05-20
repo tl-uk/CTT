@@ -13,7 +13,6 @@ services:
     ports:
       - "5555:5555"
       - "27750:27750"
-    # 5556 is used internally (engine SUB connects to fusion PUB)
     environment:
       - CTT_L1_ENGINE_HOST=engine
       - CTT_FUSION_HOST=fusion
@@ -40,7 +39,9 @@ services:
     networks:
       - ctt
     healthcheck:
-      test: ["CMD-SHELL", "python -c "import zmq; ctx=zmq.Context(); s=ctx.socket(zmq.PUB); s.bind('tcp://127.0.0.1:5560'); s.close(); ctx.term()" || exit 1"]
+      test:
+        - CMD-SHELL
+        - python3 -c "import zmq; ctx=zmq.Context(); s=ctx.socket(zmq.PUB); s.bind('tcp://127.0.0.1:5560'); s.close(); ctx.term()" || exit 1
       interval: 10s
       timeout: 3s
       retries: 3
@@ -58,7 +59,9 @@ services:
     networks:
       - ctt
     healthcheck:
-      test: ["CMD-SHELL", "python -c "import zmq; ctx=zmq.Context(); s=ctx.socket(zmq.PUB); s.bind('tcp://127.0.0.1:5561'); s.close(); ctx.term()" || exit 1"]
+      test:
+        - CMD-SHELL
+        - python3 -c "import zmq; ctx=zmq.Context(); s=ctx.socket(zmq.PUB); s.bind('tcp://127.0.0.1:5561'); s.close(); ctx.term()" || exit 1
       interval: 10s
       timeout: 3s
       retries: 3
@@ -69,7 +72,6 @@ services:
       context: ..
       dockerfile: services/data-pipeline/fusion/Dockerfile
     container_name: ctt-fusion
-    # Fusion BINDS PUB on 5556 — must be reachable by engine SUB
     ports:
       - "5556:5556"
     environment:
@@ -79,7 +81,9 @@ services:
     networks:
       - ctt
     healthcheck:
-      test: ["CMD-SHELL", "python -c "import zmq; ctx=zmq.Context(); s=ctx.socket(zmq.PUB); s.bind('tcp://127.0.0.1:5556'); s.close(); ctx.term()" || exit 1"]
+      test:
+        - CMD-SHELL
+        - python3 -c "import zmq; ctx=zmq.Context(); s=ctx.socket(zmq.PUB); s.bind('tcp://127.0.0.1:5556'); s.close(); ctx.term()" || exit 1
       interval: 10s
       timeout: 3s
       retries: 3
@@ -98,10 +102,13 @@ services:
     networks:
       - ctt
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=2)" || exit 1
       interval: 10s
       timeout: 3s
-      retries: 3
+      start_period: 5s
+      retries: 5
     restart: unless-stopped
 
   grafana:

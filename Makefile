@@ -3,11 +3,11 @@
 # =============================================================================
 
 .PHONY: help all check-deps configure-engine build-engine run-engine run-engine-fast \
-        clean-engine setup-python setup-l3 run-dashboard \
+        run-engine-bg clean-engine setup-python setup-l3 run-dashboard run-dashboard-bg \
         run-explorer run-explorer-bg \
         run-harvester run-interpreter run-fusion \
         run-harvester-bg run-interpreter-bg run-fusion-bg \
-        test-bridge test-e2e test-pipeline stop-pipeline healthcheck \
+        test-bridge test-e2e test-pipeline stop-pipeline stop-native healthcheck \
         check-ports proto proto-clean fmt-engine lint-engine docker-engine
 
 # Detect CPU cores for parallel builds
@@ -63,7 +63,7 @@ help: ## Show this help message
 	@echo "Quick start (native):"
 	@echo "  1. make check-deps     → Verify dependencies"
 	@echo "  2. make build-engine   → Compile the C++ L1 Engine"
-	@echo "  3. make run-engine     → Build & launch the Engine"
+	@echo "  3. make run-engine-bg  → Launch Engine in background"
 	@echo "  4. make setup-python   → Prepare L2 Bridge environment"
 	@echo "  5. make test-e2e       → Verify full pipeline"
 	@echo ""
@@ -78,7 +78,7 @@ help: ## Show this help message
 
 define check-port-free
 	@if lsof -i :$(1) >/dev/null 2>&1; then \
-		echo "❌ Port $(1) already in use. Run 'make stop-pipeline' first."; \
+		echo "❌ Port $(1) already in use. Run 'make stop-native' first."; \
 		exit 1; \
 	else \
 		echo "✅ Port $(1) is free for $(2)"; \
@@ -139,6 +139,13 @@ run-engine: build-engine ## Build and run the L1 Engine (blocks terminal)
 	@echo ""
 	@./$(BUILD_DIR)/CTT_Engine
 
+run-engine-bg: build-engine ## Run L1 Engine in background (logs to /tmp)
+	$(call check-port-free,5555,engine)
+	$(call check-port-free,27750,engine-rest)
+	@nohup ./$(BUILD_DIR)/CTT_Engine > /tmp/ctt_engine.log 2>&1 &
+	@echo "🚀 Engine backgrounded (log: /tmp/ctt_engine.log)"
+	@$(call wait-for-port,5555,engine)
+
 run-engine-fast: ## Run L1 Engine WITHOUT rebuilding (blocks terminal)
 	@if [ ! -f $(BUILD_DIR)/CTT_Engine ]; then \
 		echo "❌ Engine not built. Run 'make build-engine' first."; \
@@ -189,6 +196,12 @@ setup-python: ## Create Python venv and install L2 Bridge dependencies
 run-dashboard: ## Run the L2 Bridge dashboard (requires engine running)
 	@echo "📊 Starting L2 Bridge dashboard..."
 	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR)" python dashboard.py
+
+run-dashboard-bg: ## Run the L2 Bridge dashboard in background (logs to /tmp)
+	$(call check-port-free,5001,dashboard)
+	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR)" nohup python dashboard.py > /tmp/ctt_dashboard.log 2>&1 &
+	@echo "📊 Dashboard backgrounded (log: /tmp/ctt_dashboard.log)"
+	@$(call wait-for-port,5001,dashboard)
 
 # =============================================================================
 # L3 Analytics — Python Data Science & ML
@@ -247,7 +260,7 @@ healthcheck: ## Quick check: are all expected ports listening?
 	@echo "────────────────────────────────────────"
 	@echo "Component          | Port | Status"
 	@echo "────────────────────────────────────────"
-	@for port in 5555 5556 5560 5561; do \
+	@for port in 5555 5556 5560 5561 5001; do \
 		if nc -z localhost $$port 2>/dev/null; then \
 			status="✅ UP"; \
 		else \
@@ -258,6 +271,7 @@ healthcheck: ## Quick check: are all expected ports listening?
 			5556) echo "Fusion (perturbations)| 5556 | $$status" ;; \
 			5560) echo "Harvester (raw data)  | 5560 | $$status" ;; \
 			5561) echo "Interpreter (mapped)  | 5561 | $$status" ;; \
+			5001) echo "Dashboard (REST API)  | 5001 | $$status" ;; \
 		esac; \
 	done
 	@echo "────────────────────────────────────────"
@@ -268,22 +282,23 @@ test-e2e: ## Run end-to-end pipeline test (requires engine running)
 
 test-bridge: ## Launch full data pipeline in background + run E2E test
 	@echo "🔄 Launching pipeline for integration test..."
-	@make stop-pipeline >/dev/null 2>&1 || true
+	@make stop-native >/dev/null 2>&1 || true
 	@sleep 0.5
+	@make run-engine-bg
 	@make run-harvester-bg
 	@make run-interpreter-bg
 	@make run-fusion-bg
 	@echo ""
 	@echo "✅ Pipeline active. Running E2E test in 2s..."
 	@sleep 2
-	@make test-e2e || (echo "\n💥 Test failed. Cleaning up..." && make stop-pipeline && exit 1)
-	@make stop-pipeline
+	@make test-e2e || (echo "\n💥 Test failed. Cleaning up..." && make stop-native && exit 1)
+	@make stop-native
 	@echo ""
 	@echo "🎉 Full pipeline test complete."
 
 test-pipeline: test-bridge ## Alias for test-bridge
 
-stop-pipeline: ## Kill all background pipeline processes
+stop-pipeline: ## Kill all background pipeline processes (engine and dashboard NOT included)
 	@echo "🛑 Stopping pipeline..."
 	@pkill -f "harvester.py" 2>/dev/null || true
 	@pkill -f "semantic_agent.py" 2>/dev/null || true
@@ -291,6 +306,14 @@ stop-pipeline: ## Kill all background pipeline processes
 	@pkill -f "dashboard.py" 2>/dev/null || true
 	@sleep 0.5
 	@echo "✅ Pipeline stopped"
+	@make healthcheck
+
+stop-native: stop-pipeline ## Kill ALL native background processes (engine + dashboard + pipeline)
+	@echo "🛑 Stopping native engine & dashboard..."
+	@pkill -f "CTT_Engine" 2>/dev/null || true
+	@pkill -f "dashboard.py" 2>/dev/null || true
+	@sleep 0.5
+	@echo "✅ Native stack stopped"
 	@make healthcheck
 
 # =============================================================================

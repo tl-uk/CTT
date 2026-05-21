@@ -34,6 +34,11 @@ RUN cmake -B services/l1-engine/build -S services/l1-engine -G Ninja \
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     && cmake --build services/l1-engine/build --parallel $(nproc)
 
+# Stage shared libraries built from source (flecs) for the runtime stage
+RUN mkdir -p /build/stage/lib && \
+    find /build/services/l1-engine/build -name "libflecs.so*" -exec cp -a {} /build/stage/lib/ \; && \
+    ls -la /build/stage/lib/
+
 # Verify binary exists
 RUN test -x /build/services/l1-engine/build/CTT_Engine \
     && ldd /build/services/l1-engine/build/CTT_Engine \
@@ -61,10 +66,15 @@ COPY --from=builder --chown=ctt_user:ctt_user \
     /build/services/l1-engine/build/CTT_Engine \
     /usr/local/bin/CTT_Engine
 
-# Verify binary and libraries before running
+# Copy shared libraries built from source (flecs, etc.)
+COPY --from=builder /build/stage/lib/ /usr/local/lib/
+RUN ldconfig
+
+# Verify binary and libraries before switching to non-root user
 RUN test -x /usr/local/bin/CTT_Engine \
     && ldd /usr/local/bin/CTT_Engine | grep -q "libzmq" \
     && ldd /usr/local/bin/CTT_Engine | grep -q "libprotobuf" \
+    && ldd /usr/local/bin/CTT_Engine | grep -q "libflecs" \
     && echo "Binary verified"
 
 USER ctt_user

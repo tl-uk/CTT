@@ -95,7 +95,7 @@ services:
       dockerfile: services/l2-bridge/Dockerfile
     container_name: ctt-dashboard
     ports:
-      - "5000:5000"
+      - "5001:5001"
     environment:
       - CTT_L1_ENGINE_HOST=engine
       - CTT_FUSION_HOST=fusion
@@ -104,7 +104,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=2)" || exit 1
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:5001/health', timeout=2)" || exit 1
       interval: 10s
       timeout: 3s
       start_period: 5s

@@ -5,7 +5,7 @@ scripts/test_e2e.py
 End-to-end pipeline verification for CTT.
 
 Modes:
-  --mode standalone : Assumes engine running; starts interpreter + fusion, acts as harvester, verifies via telemetry
+  --mode standalone : Starts interpreter + fusion, acts as harvester, verifies via telemetry
   --mode docker     : Assumes stack is running in Docker; verifies all services
   --mode inject     : Assumes all components running; just injects test payloads
 
@@ -107,7 +107,7 @@ def run_docker_test():
     # Check dashboard API
     print("\n🔍 Check 1: Dashboard API")
     try:
-        resp = requests.get("http://localhost:5001/health", timeout=5)  # FIX: 5000 → 5001
+        resp = requests.get("http://localhost:5001/health", timeout=5)
         if resp.status_code == 200:
             health = resp.json()
             print(f"   ✅ Dashboard healthy: {health}")
@@ -169,45 +169,33 @@ def run_standalone_test():
         sys.exit(1)
     print("✅ C++ Engine telemetry detected on port 5555")
 
-    # FIX: In standalone mode launched by test-bridge, pipeline ports should be LISTENING
-    # (services already started by Makefile). Only warn if they are NOT listening.
-    pipeline_ports = {5560: "harvester", 5561: "interpreter", 5556: "fusion"}
-    missing = []
-    for port, name in pipeline_ports.items():
-        if not wait_for_port(port, timeout=0.5):
-            missing.append((port, name))
-    
-    if missing:
-        print(f"⚠️  Some pipeline services not detected (will start them):")
-        for port, name in missing:
-            print(f"   • Port {port} ({name}) not listening")
-    else:
-        print("✅ Pipeline services detected on ports 5560/5561/5556")
+    # Check no existing pipeline processes that would cause port conflicts
+    for port in [5560, 5561]:
+        if wait_for_port(port, timeout=0.5):
+            print(f"⚠️  Port {port} already in use. Run 'make stop-pipeline' first.")
+            sys.exit(1)
+    print("✅ Pipeline ports 5560/5561 are free")
 
-    # Start interpreter and fusion as subprocesses ONLY if not already running
+    # Start interpreter and fusion as subprocesses
     procs = []
     root = os.path.dirname(os.path.dirname(__file__))
 
     try:
-        # Only start interpreter if port 5561 is not already listening
-        if not wait_for_port(5561, timeout=0.5):
-            interpreter = subprocess.Popen(
-                [sys.executable, os.path.join(root, "services", "data-pipeline", "interpreter", "semantic_agent.py")],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                env={**os.environ, "PYTHONPATH": os.path.join(root, "services", "config")}
-            )
-            procs.append(("interpreter", interpreter))
+        interpreter = subprocess.Popen(
+            [sys.executable, os.path.join(root, "services", "data-pipeline", "interpreter", "semantic_agent.py")],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            env={**os.environ, "PYTHONPATH": os.path.join(root, "services", "config")}
+        )
+        procs.append(("interpreter", interpreter))
 
-        # Only start fusion if port 5556 is not already listening
-        if not wait_for_port(5556, timeout=0.5):
-            fusion = subprocess.Popen(
-                [sys.executable, os.path.join(root, "services", "data-pipeline", "fusion", "fusion_engine.py")],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                env={**os.environ, "PYTHONPATH": os.path.join(root, "services", "config")}
-            )
-            procs.append(("fusion", fusion))
+        fusion = subprocess.Popen(
+            [sys.executable, os.path.join(root, "services", "data-pipeline", "fusion", "fusion_engine.py")],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            env={**os.environ, "PYTHONPATH": os.path.join(root, "services", "config")}
+        )
+        procs.append(("fusion", fusion))
 
-        # Wait for components to bind their ports (whether we started them or they were already there)
+        # Wait for components to bind their ports
         print("\n⏳ Waiting for pipeline components to bind ports...")
         if not wait_for_port(5561, timeout=5.0):
             print("❌ Interpreter failed to bind port 5561")

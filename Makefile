@@ -286,11 +286,10 @@ test-bridge: ## Launch full data pipeline in background + run E2E test
 	@make stop-native >/dev/null 2>&1 || true
 	@sleep 1
 	@make run-engine-bg
-	@make run-harvester-bg
 	@make run-interpreter-bg
 	@make run-fusion-bg
 	@echo ""
-	@echo "✅ Pipeline active. Stabilizing for 5s..."
+	@echo "✅ Pipeline active (engine + interpreter + fusion). Stabilizing for 5s..."
 	@sleep 5
 	@make test-e2e || (echo "\n💥 Test failed. Cleaning up..." && make stop-native && exit 1)
 	@make stop-native

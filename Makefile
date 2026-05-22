@@ -1,411 +1,342 @@
-# =============================================================================
-# CTT Project — Cross-Platform Build Orchestration (macOS / Linux / Docker)
-# =============================================================================
+#!/usr/bin/env python3
+"""
+scripts/test_e2e.py
 
-.PHONY: help all check-deps configure-engine build-engine run-engine run-engine-fast \
-        run-engine-bg clean-engine setup-python setup-l3 run-dashboard run-dashboard-bg \
-        run-explorer run-explorer-bg \
-        run-harvester run-interpreter run-fusion \
-        run-harvester-bg run-interpreter-bg run-fusion-bg \
-        test-bridge test-e2e test-pipeline stop-pipeline stop-native healthcheck \
-        check-ports proto proto-clean fmt-engine lint-engine docker-engine
+End-to-end pipeline verification for CTT.
 
-# Detect CPU cores for parallel builds
-NPROCS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+Modes:
+  --mode standalone : Assumes engine running; starts interpreter + fusion, acts as harvester, verifies via telemetry
+  --mode docker     : Assumes stack is running in Docker; verifies all services
+  --mode inject     : Assumes all components running; just injects test payloads
 
-# Service directories
-L1_DIR     := services/l1-engine
-L2_DIR     := services/l2-bridge
-L3_DIR     := services/l3-analytics
-BUILD_DIR  := $(L1_DIR)/build
-CONFIG_DIR := services/config
+This test verifies:
+  1. Data flows: harvester → interpreter → fusion → C++ engine
+  2. C++ engine applies perturbations (observed via telemetry on 5555)
+  3. Dashboard API serves agent data
+  4. No port conflicts or ZMQ topology errors
 
-# =============================================================================
-# Platform Detection (macOS vs Linux/Docker)
-# =============================================================================
-UNAME_S := $(shell uname -s)
-UNAME_M := $(shell uname -m)
+Usage:
+  Terminal 1: make run-engine
+  Terminal 2: python scripts/test_e2e.py --mode standalone
+  Or (Docker): python scripts/test_e2e.py --mode docker
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+import signal
+import zmq
+import requests
 
-ifeq ($(UNAME_S),Darwin)
-    CMAKE_PLATFORM_ARGS := -DCMAKE_OSX_ARCHITECTURES=$(UNAME_M)
-    ifeq ($(UNAME_M),arm64)
-        ZMQ_PREFIX ?= /opt/homebrew/opt/zeromq
-    else
-        ZMQ_PREFIX ?= /usr/local/opt/zeromq
-    endif
-    CMAKE_EXTRA := -DCMAKE_PREFIX_PATH=$(ZMQ_PREFIX)
-else
-    # Linux / Docker — standard system paths via pkg-config
-    CMAKE_PLATFORM_ARGS :=
-    CMAKE_EXTRA :=
-endif
+# Add project root to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "config"))
+from ports import ZMQ_PORTS
 
-# =============================================================================
-# Python Tooling Detection (uv preferred, falls back to venv+pip)
-# =============================================================================
-HAS_UV := $(shell which uv 2>/dev/null)
-PYTHON_VENV_CMD  := $(if $(HAS_UV),uv venv --python 3.13,python3 -m venv .venv)
-PYTHON_PIP_CMD   := $(if $(HAS_UV),uv pip install,.venv/bin/pip install)
-PYTHON_BIN       := $(L2_DIR)/.venv/bin/python
+# Test payloads — must match what interpreter expects
+TEST_PAYLOADS = [
+    {"truck_id": "Volvo_eHGV_001", "fuel_type": "Diesel", "efficiency_score": 0.69, "route": "Test_Route_A", "source": "e2e_test"},
+    {"truck_id": "all_hgv", "fuel_type": "Diesel", "efficiency_score": 0.42, "route": "Test_Route_B", "source": "e2e_test"},
+    {"truck_id": "Volvo_eHGV_001", "fuel_type": "Diesel", "efficiency_score": 0.15, "route": "Test_Route_C", "source": "e2e_test"},
+]
 
-# =============================================================================
-# Help
-# =============================================================================
+def wait_for_port(port: int, timeout: float = 5.0, host: str = "localhost") -> bool:
+    """Poll until a TCP port is accepting connections."""
+    import socket
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return True
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            time.sleep(0.2)
+    return False
 
-help: ## Show this help message
-	@echo "╔══════════════════════════════════════════════════════════════╗"
-	@echo "║           CTT Project — Build & Run Commands                 ║"
-	@echo "╚══════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
-	@echo ""
-	@echo "Quick start (native):"
-	@echo "  1. make check-deps     → Verify dependencies"
-	@echo "  2. make build-engine   → Compile the C++ L1 Engine"
-	@echo "  3. make run-engine-bg  → Launch Engine in background"
-	@echo "  4. make setup-python   → Prepare L2 Bridge environment"
-	@echo "  5. make test-e2e       → Verify full pipeline"
-	@echo ""
-	@echo "Docker:"
-	@echo "  make docker-engine     → Build L1 Engine Docker image"
-	@echo "  docker compose up      → Launch full stack (requires docker-compose.yml)"
-	@echo ""
+def kill_processes(procs):
+    """Gracefully terminate subprocesses."""
+    for name, proc in procs:
+        print(f"\n🛑 Stopping {name} (PID {proc.pid})...")
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
 
-# =============================================================================
-# Internal Helpers
-# =============================================================================
+def check_docker_services():
+    """Check if Docker Compose services are healthy."""
+    print("\n🔍 Checking Docker Compose services...")
+    try:
+        result = subprocess.run(
+            ["docker-compose", "-f", "deploy/docker-compose.yml", "ps", "-q"],
+            capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(__file__))
+        )
+        if not result.stdout.strip():
+            print("❌ No Docker containers running. Run 'docker-compose up -d' first.")
+            return False
 
-define check-port-free
-	@if lsof -i :$(1) >/dev/null 2>&1; then \
-		echo "❌ Port $(1) already in use. Run 'make stop-native' first."; \
-		exit 1; \
-	else \
-		echo "✅ Port $(1) is free for $(2)"; \
-	fi
-endef
+        # Check health of each service
+        services = ["engine", "harvester", "interpreter", "fusion", "dashboard"]
+        all_healthy = True
+        for svc in services:
+            health = subprocess.run(
+                ["docker", "inspect", "--format", "{{.State.Health.Status}}", f"ctt-{svc}"],
+                capture_output=True, text=True
+            )
+            status = health.stdout.strip() if health.returncode == 0 else "unknown"
+            icon = "✅" if status == "healthy" else "⬜" if status in ("starting", "") else "❌"
+            print(f"   {icon} ctt-{svc}: {status}")
+            if status not in ("healthy", "starting", ""):
+                all_healthy = False
 
-define wait-for-port
-	@echo "⏳ Waiting for $(2) to bind port $(1)..."
-	@for i in $$(seq 1 25); do \
-		if nc -z localhost $(1) 2>/dev/null; then \
-			echo "✅ $(2) is listening on $(1)"; \
-			exit 0; \
-		fi; \
-		sleep 0.2; \
-	done; \
-	echo "❌ $(2) failed to bind port $(1) within 5s"; \
-	exit 1
-endef
+        return all_healthy
+    except FileNotFoundError:
+        print("❌ docker-compose not found in PATH")
+        return False
 
-# =============================================================================
-# L1 Engine — C++ Flecs Core
-# =============================================================================
+def run_docker_test():
+    """Test against running Docker stack."""
+    print("=" * 70)
+    print("CTT End-to-End Pipeline Test (Docker Mode)")
+    print("=" * 70)
 
-check-deps: ## Verify system dependencies (cmake, ninja, pkg-config, zeromq)
-	@echo "🔍 Checking system dependencies..."
-	@which cmake >/dev/null 2>&1 || (echo "❌ cmake not found. Install: apt install cmake ninja-build pkg-config" && exit 1)
-	@which ninja >/dev/null 2>&1 || (echo "❌ ninja not found. Install: apt install ninja-build" && exit 1)
-	@which pkg-config >/dev/null 2>&1 || (echo "❌ pkg-config not found. Install: apt install pkg-config" && exit 1)
-ifeq ($(UNAME_S),Darwin)
-	@test -d $(ZMQ_PREFIX)/lib || (echo "❌ zeromq not found at $(ZMQ_PREFIX). Run: brew install zeromq" && exit 1)
-else
-	@pkg-config --exists libzmq || (echo "❌ libzmq not found. Run: apt install libzmq3-dev" && exit 1)
-endif
-	@echo "✅ All system dependencies found"
+    if not check_docker_services():
+        print("\n⚠️  Some services not healthy — continuing with available checks...")
 
-configure-engine: check-deps ## Configure CMake for L1 Engine (clean configure)
-	@echo "⚙️  Configuring L1 Engine..."
-	@rm -rf $(BUILD_DIR)
-	@cmake -B $(BUILD_DIR) -S $(L1_DIR) -G Ninja \
-		-DCMAKE_BUILD_TYPE=Release \
-		$(CMAKE_PLATFORM_ARGS) \
-		$(CMAKE_EXTRA) \
-		-DCMAKE_POLICY_VERSION_MINIMUM=3.5
-	@echo "✅ Configure complete"
+    # Check dashboard API
+    print("\n🔍 Check 1: Dashboard API")
+    try:
+        resp = requests.get("http://localhost:5001/health", timeout=5)  # FIX: 5000 → 5001
+        if resp.status_code == 200:
+            health = resp.json()
+            print(f"   ✅ Dashboard healthy: {health}")
+        else:
+            print(f"   ❌ Dashboard returned {resp.status_code}")
+    except Exception as e:
+        print(f"   ❌ Dashboard unreachable: {e}")
 
-build-engine: configure-engine ## Build the C++ L1 Engine with all cores
-	@echo "🔨 Building L1 Engine with $(NPROCS) cores..."
-	@cmake --build $(BUILD_DIR) --parallel $(NPROCS)
-	@echo ""
-	@echo "✅ Build complete: $(BUILD_DIR)/CTT_Engine"
-	@echo ""
+    # Check telemetry
+    print("\n🔍 Check 2: Engine Telemetry")
+    context = zmq.Context()
+    sub = context.socket(zmq.SUB)
+    sub.connect("tcp://localhost:5555")
+    sub.set(zmq.SUBSCRIBE, b"")
+    sub.set(zmq.RCVTIMEO, 5000)
 
-run-engine: build-engine ## Build and run the L1 Engine (blocks terminal)
-	@echo "🚀 Starting CTT L1 Engine..."
-	@echo "   REST API:    http://localhost:27750"
-	@echo "   ZMQ Pub:     tcp://localhost:5555  (telemetry)"
-	@echo "   ZMQ Sub:     tcp://localhost:5556  (perturbations — Fusion binds here)"
-	@echo ""
-	@./$(BUILD_DIR)/CTT_Engine
+    try:
+        msg = sub.recv()
+        data = json.loads(msg.decode("utf-8"))
+        if isinstance(data, list) and len(data) > 0:
+            print(f"   ✅ Telemetry flowing: {len(data)} agents")
+            for a in data[:3]:
+                print(f"      • {a.get('entity_name', '?')}: pressure={a.get('adversarial_pressure', '?')}, mode={a.get('mode', '?')}")
+        else:
+            print(f"   ⚠️  Telemetry received but empty or malformed")
+    except zmq.error.Again:
+        print("   ❌ No telemetry received — engine may be down")
+    except Exception as e:
+        print(f"   ❌ Telemetry error: {e}")
+    finally:
+        sub.close()
+        context.term()
 
-run-engine-bg: build-engine ## Run L1 Engine in background (logs to /tmp)
-	$(call check-port-free,5555,engine)
-	$(call check-port-free,27750,engine-rest)
-	@nohup ./$(BUILD_DIR)/CTT_Engine > /tmp/ctt_engine.log 2>&1 &
-	@echo "🚀 Engine backgrounded (log: /tmp/ctt_engine.log)"
-	@$(call wait-for-port,5555,engine)
+    # Check Grafana
+    print("\n🔍 Check 3: Grafana")
+    try:
+        resp = requests.get("http://localhost:3000/api/health", timeout=5, auth=("admin", "ctt-admin-2026"))
+        if resp.status_code == 200:
+            print(f"   ✅ Grafana healthy: {resp.json()}")
+        else:
+            print(f"   ⚠️  Grafana returned {resp.status_code}")
+    except Exception as e:
+        print(f"   ⚠️  Grafana unreachable: {e}")
 
-run-engine-fast: ## Run L1 Engine WITHOUT rebuilding (blocks terminal)
-	@if [ ! -f $(BUILD_DIR)/CTT_Engine ]; then \
-		echo "❌ Engine not built. Run 'make build-engine' first."; \
-		exit 1; \
-	fi
-	@echo "🚀 Starting CTT L1 Engine (fast mode, no rebuild)..."
-	@./$(BUILD_DIR)/CTT_Engine
+    print("\n" + "=" * 70)
+    print("Docker test complete. Review logs above.")
+    print("=" * 70)
 
-clean-engine: ## Remove L1 Engine build artifacts
-	@echo "🧹 Cleaning L1 Engine build..."
-	@rm -rf $(BUILD_DIR)
-	@echo "✅ Clean complete"
+def run_standalone_test():
+    """Full test: start pipeline components, inject data, verify via telemetry."""
+    print("=" * 70)
+    print("CTT End-to-End Pipeline Test (Standalone Mode)")
+    print("=" * 70)
+    print("\nPre-flight checks...")
 
-docker-engine: ## Build L1 Engine Docker image
-	@which docker >/dev/null 2>&1 || { \
-		echo "❌ Docker binary not found in PATH."; \
-		echo "   macOS:  brew install docker colima"; \
-		echo "   Linux:  https://docs.docker.com/get-docker/"; \
-		echo "   Or build natively: make build-engine"; \
-		exit 1; \
-	}
-	@docker info >/dev/null 2>&1 || { \
-		echo "❌ Docker daemon is not running."; \
-		echo ""; \
-		echo "   If you use Colima:"; \
-		echo "      colima start --cpu 4 --memory 8"; \
-		echo ""; \
-		echo "   If you use Docker Desktop:"; \
-		echo "      Open Docker Desktop from Applications and wait for the whale icon."; \
-		echo ""; \
-		echo "   Or build natively: make build-engine"; \
-		exit 1; \
-	}
-	@echo "🐳 Building L1 Engine Docker image..."
-	@docker build -f $(L1_DIR)/Dockerfile -t ctt-engine:latest .
-	@echo "✅ Docker image ctt-engine:latest built"
+    # Check C++ engine telemetry port is alive
+    if not wait_for_port(5555, timeout=3.0):
+        print("❌ C++ Engine not detected on port 5555. Run 'make run-engine' first.")
+        sys.exit(1)
+    print("✅ C++ Engine telemetry detected on port 5555")
 
-# =============================================================================
-# L2 Bridge — Python Telemetry & Dashboard
-# =============================================================================
+    # FIX: In standalone mode launched by test-bridge, pipeline ports should be LISTENING
+    # (services already started by Makefile). Only warn if they are NOT listening.
+    pipeline_ports = {5560: "harvester", 5561: "interpreter", 5556: "fusion"}
+    missing = []
+    for port, name in pipeline_ports.items():
+        if not wait_for_port(port, timeout=0.5):
+            missing.append((port, name))
+    
+    if missing:
+        print(f"⚠️  Some pipeline services not detected (will start them):")
+        for port, name in missing:
+            print(f"   • Port {port} ({name}) not listening")
+    else:
+        print("✅ Pipeline services detected on ports 5560/5561/5556")
 
-setup-python: ## Create Python venv and install L2 Bridge dependencies
-	@echo "🐍 Setting up Python environment for L2 Bridge..."
-	@cd $(L2_DIR) && $(PYTHON_VENV_CMD)
-	@cd $(L2_DIR) && $(PYTHON_PIP_CMD) -r requirements.txt
-	@echo "✅ Python environment ready in $(L2_DIR)/.venv"
+    # Start interpreter and fusion as subprocesses ONLY if not already running
+    procs = []
+    root = os.path.dirname(os.path.dirname(__file__))
 
-run-dashboard: ## Run the L2 Bridge dashboard (requires engine running)
-	@echo "📊 Starting L2 Bridge dashboard..."
-	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR)" python dashboard.py
+    try:
+        # Only start interpreter if port 5561 is not already listening
+        if not wait_for_port(5561, timeout=0.5):
+            interpreter = subprocess.Popen(
+                [sys.executable, os.path.join(root, "services", "data-pipeline", "interpreter", "semantic_agent.py")],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env={**os.environ, "PYTHONPATH": os.path.join(root, "services", "config")}
+            )
+            procs.append(("interpreter", interpreter))
 
-run-dashboard-bg: ## Run the L2 Bridge dashboard in background (logs to /tmp)
-	$(call check-port-free,5001,dashboard)
-	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR)" nohup python dashboard.py > /tmp/ctt_dashboard.log 2>&1 &
-	@echo "📊 Dashboard backgrounded (log: /tmp/ctt_dashboard.log)"
-	@$(call wait-for-port,5001,dashboard)
+        # Only start fusion if port 5556 is not already listening
+        if not wait_for_port(5556, timeout=0.5):
+            fusion = subprocess.Popen(
+                [sys.executable, os.path.join(root, "services", "data-pipeline", "fusion", "fusion_engine.py")],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env={**os.environ, "PYTHONPATH": os.path.join(root, "services", "config")}
+            )
+            procs.append(("fusion", fusion))
 
-# =============================================================================
-# L3 Analytics — Python Data Science & ML
-# =============================================================================
+        # Wait for components to bind their ports (whether we started them or they were already there)
+        print("\n⏳ Waiting for pipeline components to bind ports...")
+        if not wait_for_port(5561, timeout=5.0):
+            print("❌ Interpreter failed to bind port 5561")
+            sys.exit(1)
+        if not wait_for_port(5556, timeout=5.0):
+            print("❌ Fusion failed to bind port 5556")
+            sys.exit(1)
+        print("✅ Interpreter + Fusion are online")
 
-setup-l3: ## Setup L3 Analytics environment
-	@echo "🐍 Setting up L3 Analytics..."
-	@cd $(L3_DIR) && $(PYTHON_VENV_CMD)
-	@cd $(L3_DIR) && $(PYTHON_PIP_CMD) -r requirements.txt
+        # Setup ZMQ: act as harvester + telemetry listener
+        context = zmq.Context()
 
-# =============================================================================
-# Data Pipeline — Inbound Refinery
-# =============================================================================
+        # PUB on 5560 (replacing harvester)
+        harvester_pub = context.socket(zmq.PUB)
+        harvester_pub.bind(ZMQ_PORTS["HARVESTER_PUB"])
 
-run-harvester: ## Run the mock SME Harvester (Ingestor) — foreground
-	@echo "📡 Starting SME Harvester..."
-	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR)" python ../data-pipeline/ingestor/harvester.py
+        # SUB on 5555 (C++ telemetry)
+        telemetry_sub = context.socket(zmq.SUB)
+        telemetry_sub.connect(ZMQ_PORTS["L1_TELEMETRY_SUB"])
+        telemetry_sub.setsockopt_string(zmq.SUBSCRIBE, "")
 
-run-interpreter: ## Run the Semantic Agent (Interpreter) — foreground
-	@echo "🧠 Starting Semantic Interpreter..."
-	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR)" python ../data-pipeline/interpreter/semantic_agent.py
+        # ZMQ slow-joiner
+        time.sleep(1.0)
 
-run-fusion: ## Run the Fusion Engine (Command & Control) — foreground
-	@echo "⚡ Starting Fusion Engine..."
-	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR):../data-pipeline/fusion" python ../data-pipeline/fusion/fusion_engine.py
+        print("\n📡 Sending test payloads through pipeline...")
+        print(f"{'#':>3} | {'Agent':20s} | {'Efficiency':>10s} | {'Expected ΔP':>12s}")
+        print("-" * 55)
 
-# Background variants with port conflict checks and startup verification
-run-harvester-bg: ## Run harvester in background (logs to /tmp)
-	$(call check-port-free,5560,harvester)
-	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR)" nohup python ../data-pipeline/ingestor/harvester.py > /tmp/ctt_harvester.log 2>&1 &
-	@echo "📡 Harvester backgrounded (log: /tmp/ctt_harvester.log)"
-	@$(call wait-for-port,5560,harvester)
+        expected_pressures = {}
+        for i, payload in enumerate(TEST_PAYLOADS, 1):
+            expected_pressure = round((1.0 - payload["efficiency_score"]) * 100, 1)
+            expected_pressures[payload["truck_id"]] = expected_pressure
 
-run-interpreter-bg: ## Run interpreter in background
-	$(call check-port-free,5561,interpreter)
-	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR)" nohup python ../data-pipeline/interpreter/semantic_agent.py > /tmp/ctt_interpreter.log 2>&1 &
-	@echo "🧠 Interpreter backgrounded (log: /tmp/ctt_interpreter.log)"
-	@$(call wait-for-port,5561,interpreter)
+            harvester_pub.send_string(json.dumps(payload))
+            print(f"{i:>3} | {payload['truck_id']:20s} | {payload['efficiency_score']:>10.2f} | {expected_pressure:>12.1f}")
+            time.sleep(1.5)
 
-run-fusion-bg: ## Run fusion in background
-	$(call check-port-free,5556,fusion)
-	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR):../data-pipeline/fusion" nohup python ../data-pipeline/fusion/fusion_engine.py > /tmp/ctt_fusion.log 2>&1 &
-	@echo "⚡ Fusion backgrounded (log: /tmp/ctt_fusion.log)"
-	@$(call wait-for-port,5556,fusion)
+        print("\n⏳ Waiting for telemetry feedback (up to 5s)...")
 
-# =============================================================================
-# Testing & Verification
-# =============================================================================
+        # Collect telemetry for up to 5 seconds
+        deadline = time.time() + 5.0
+        telemetry_found = False
+        agent_states = {}
 
-check-ports: ## Validate Python/C++ port configs are synchronized
-	@echo "🔍 Validating port configuration sync..."
-	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR)" python $(CONFIG_DIR)/validate_ports.py
+        while time.time() < deadline:
+            try:
+                msg = telemetry_sub.recv_string(flags=zmq.NOBLOCK)
+                data = json.loads(msg)
+                if isinstance(data, list):
+                    for agent in data:
+                        agent_states[agent.get("entity_name", "unknown")] = agent
+                    telemetry_found = True
+                    break
+            except zmq.Again:
+                time.sleep(0.1)
 
-healthcheck: ## Quick check: are all expected ports listening?
-	@echo "🏥 CTT Healthcheck"
-	@echo "────────────────────────────────────────"
-	@echo "Component          | Port | Status"
-	@echo "────────────────────────────────────────"
-	@for port in 5555 5556 5560 5561 5001; do \
-		if nc -z localhost $$port 2>/dev/null; then \
-			status="✅ UP"; \
-		else \
-			status="⬜ DOWN"; \
-		fi; \
-		case $$port in \
-			5555) echo "L1 Engine (telemetry) | 5555 | $$status" ;; \
-			5556) echo "Fusion (perturbations)| 5556 | $$status" ;; \
-			5560) echo "Harvester (raw data)  | 5560 | $$status" ;; \
-			5561) echo "Interpreter (mapped)  | 5561 | $$status" ;; \
-			5001) echo "Dashboard (REST API)  | 5001 | $$status" ;; \
-		esac; \
-	done
-	@echo "────────────────────────────────────────"
+        print("\n" + "=" * 70)
+        print("RESULTS")
+        print("=" * 70)
 
-test-e2e: ## Run end-to-end pipeline test (requires engine running)
-	@echo "🧪 Running end-to-end pipeline test..."
-	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR):../data-pipeline/fusion" python ../../scripts/test_e2e.py --mode standalone
+        if not telemetry_found:
+            print("❌ NO TELEMETRY RECEIVED")
+            print("   Possible causes:")
+            print("   • C++ engine not broadcasting (check make run-engine)")
+            print("   • ZMQ SUB failed to connect to 5555")
+            print("   • Pipeline dropped messages (check component logs below)")
+            success = False
+        else:
+            print("✅ Telemetry received from C++ engine")
+            print(f"   Agents in world: {list(agent_states.keys())}")
 
-test-bridge: ## Launch full data pipeline in background + run E2E test
-	@echo "🔄 Launching pipeline for integration test..."
-	@make stop-native >/dev/null 2>&1 || true
-	@sleep 0.5
-	@make run-engine-bg
-	@make run-harvester-bg
-	@make run-interpreter-bg
-	@make run-fusion-bg
-	@echo ""
-	@echo "✅ Pipeline active. Running E2E test in 2s..."
-	@sleep 2
-	@make test-e2e || (echo "\n💥 Test failed. Cleaning up..." && make stop-native && exit 1)
-	@make stop-native
-	@echo ""
-	@echo "🎉 Full pipeline test complete."
+            # Check if Volvo_eHGV_001 has pressure > 0
+            volvo = agent_states.get("Volvo_eHGV_001", {})
+            pressure = volvo.get("adversarial_pressure", 0)
 
-test-pipeline: test-bridge ## Alias for test-bridge
+            if pressure > 0:
+                print(f"✅ Perturbation APPLIED — Volvo_eHGV_001 pressure = {pressure:.1f}")
+                success = True
+            else:
+                print(f"❌ Perturbation NOT APPLIED — Volvo_eHGV_001 pressure = {pressure:.1f}")
+                print("   The pipeline delivered data but the C++ engine may not have parsed Protobuf.")
+                success = False
 
-stop-pipeline: ## Kill all background pipeline processes (engine and dashboard NOT included)
-	@echo "🛑 Stopping pipeline..."
-	@pkill -f "harvester.py" 2>/dev/null || true
-	@pkill -f "semantic_agent.py" 2>/dev/null || true
-	@pkill -f "fusion_engine.py" 2>/dev/null || true
-	@pkill -f "dashboard.py" 2>/dev/null || true
-	@sleep 0.5
-	@echo "✅ Pipeline stopped"
-	@make healthcheck
+        harvester_pub.close()
+        telemetry_sub.close()
+        context.term()
 
-stop-native: stop-pipeline ## Kill ALL native background processes (engine + dashboard + pipeline)
-	@echo "🛑 Stopping native engine & dashboard..."
-	@pkill -f "CTT_Engine" 2>/dev/null || true
-	@pkill -f "dashboard.py" 2>/dev/null || true
-	@sleep 0.5
-	@echo "✅ Native stack stopped"
-	@make healthcheck
+        if success:
+            print("\n🎉 END-TO-END TEST PASSED")
+            sys.exit(0)
+        else:
+            print("\n💥 END-TO-END TEST FAILED")
+            sys.exit(1)
 
-# =============================================================================
-# Flecs Explorer — Local UI
-# =============================================================================
+    except KeyboardInterrupt:
+        print("\n\n🛑 Test interrupted by user.")
+    finally:
+        kill_processes(procs)
 
-EXPLORER_DIR := $(HOME)/explorer
+def run_inject_test():
+    """Lightweight: assumes everything running, just injects payloads."""
+    print("=" * 70)
+    print("CTT Pipeline Inject Test")
+    print("=" * 70)
 
-run-explorer: ## Host Flecs Explorer on http://localhost:8000
-	@if [ ! -d $(EXPLORER_DIR)/etc ]; then \
-		echo "🌐 Flecs Explorer not found. Cloning to $(EXPLORER_DIR)..."; \
-		git clone --depth 1 https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); \
-	fi
-	@echo "🌐 Starting Flecs Explorer at http://localhost:8000"
-	@cd $(EXPLORER_DIR)/etc && python3 -m http.server 8000
+    context = zmq.Context()
+    pub = context.socket(zmq.PUB)
+    pub.bind(ZMQ_PORTS["HARVESTER_PUB"])
+    time.sleep(0.5)
 
-run-explorer-bg: ## Start Flecs Explorer in background
-	@if [ ! -d $(EXPLORER_DIR)/etc ]; then \
-		git clone --depth 1 https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); \
-	fi
-	@cd $(EXPLORER_DIR)/etc && nohup python3 -m http.server 8000 > /tmp/ctt_explorer.log 2>&1 &
-	@echo "🌐 Explorer backgrounded (log: /tmp/ctt_explorer.log)"
+    print("\n📡 Injecting test payloads...")
+    for payload in TEST_PAYLOADS:
+        pub.send_string(json.dumps(payload))
+        print(f"   → {payload['truck_id']} | efficiency={payload['efficiency_score']}")
+        time.sleep(1.0)
 
-# =============================================================================
-# Protobuf Generation
-# =============================================================================
+    print("\n✅ Inject complete. Check C++ engine terminal for perturbation logs.")
+    pub.close()
+    context.term()
 
-PROTO_FILE := api/proto/ctt_messages.proto
-PROTO_OUT  := services/data-pipeline/fusion
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="CTT End-to-End Pipeline Test")
+    parser.add_argument("--mode", choices=["standalone", "docker", "inject"], default="standalone",
+                        help="standalone: full test with subprocesses | docker: test running stack | inject: just send data")
+    args = parser.parse_args()
 
-proto: ## Generate Python protobuf module
-	@echo "🧬 Generating Protobuf bindings..."
-	@$(PYTHON_BIN) -m grpc_tools.protoc \
-		--python_out=$(PROTO_OUT) \
-		-Iapi/proto \
-		$(PROTO_FILE)
-	@echo "✅ Generated: $(PROTO_OUT)/ctt_messages_pb2.py"
-
-proto-clean: ## Remove generated protobuf files
-	@rm -f $(PROTO_OUT)/ctt_messages_pb2.py
-	@echo "🧹 Protobuf bindings cleaned"
-
-# =============================================================================
-# Docker Compose Targets
-# =============================================================================
-
-COMPOSE_FILE := deploy/docker-compose.yml
-
-docker-engine: ## Build L1 Engine Docker image
-	@which docker >/dev/null 2>&1 || { \
-		echo "❌ Docker not found. Install: brew install docker colima"; \
-		exit 1; \
-	}
-	@docker info >/dev/null 2>&1 || { \
-		echo "❌ Docker daemon not running. Run: colima start"; \
-		exit 1; \
-	}
-	@echo "🐳 Building L1 Engine Docker image..."
-	@docker build -f $(L1_DIR)/Dockerfile -t ctt-engine:latest .
-	@echo "✅ Docker image ctt-engine:latest built"
-
-compose-build: ## Build all services via docker-compose
-	@echo "🔨 Building CTT stack..."
-	@docker-compose -f $(COMPOSE_FILE) build
-
-compose-up: ## Start CTT stack in detached mode
-	@echo "🚀 Starting CTT stack..."
-	@docker-compose -f $(COMPOSE_FILE) up -d
-
-compose-down: ## Stop and remove CTT stack
-	@echo "🛑 Stopping CTT stack..."
-	@docker-compose -f $(COMPOSE_FILE) down
-
-compose-logs: ## Tail fusion logs
-	@docker-compose -f $(COMPOSE_FILE) logs -f fusion
-
-compose-ps: ## Show running services
-	@docker-compose -f $(COMPOSE_FILE) ps
-
-# =============================================================================
-# Global Utilities
-# =============================================================================
-
-fmt-engine: ## Format C++ source files (requires clang-format)
-	@echo "🎨 Formatting C++ sources..."
-	@find $(L1_DIR)/src $(L1_DIR)/include -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) | \
-		xargs clang-format -i -style=file 2>/dev/null || \
-		echo "⚠️  clang-format not installed."
-
-clean-all: clean-engine ## Clean everything (builds + Python envs)
-	@echo "🧹 Cleaning Python environments..."
-	@rm -rf $(L2_DIR)/.venv $(L3_DIR)/.venv 2>/dev/null || true
-	@echo "✅ All artifacts cleaned"
-
-all: build-engine setup-python ## Build engine + setup Python (full onboarding)
+    if args.mode == "standalone":
+        run_standalone_test()
+    elif args.mode == "docker":
+        run_docker_test()
+    else:
+        run_inject_test()

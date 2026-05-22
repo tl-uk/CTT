@@ -5,7 +5,7 @@ scripts/test_e2e.py
 End-to-end pipeline verification for CTT.
 
 Modes:
-  --mode standalone : Starts interpreter + fusion, acts as harvester, verifies via telemetry
+  --mode standalone : Assumes engine running; starts interpreter + fusion, acts as harvester, verifies via telemetry
   --mode docker     : Assumes stack is running in Docker; verifies all services
   --mode inject     : Assumes all components running; just injects test payloads
 
@@ -107,7 +107,7 @@ def run_docker_test():
     # Check dashboard API
     print("\n🔍 Check 1: Dashboard API")
     try:
-        resp = requests.get("http://localhost:5001/health", timeout=5)
+        resp = requests.get("http://localhost:5001/health", timeout=5)  # FIX: 5000 → 5001
         if resp.status_code == 200:
             health = resp.json()
             print(f"   ✅ Dashboard healthy: {health}")
@@ -176,26 +176,30 @@ def run_standalone_test():
             sys.exit(1)
     print("✅ Pipeline ports 5560/5561 are free")
 
-    # Start interpreter and fusion as subprocesses
+    # Start interpreter and fusion as subprocesses ONLY if not already running
     procs = []
     root = os.path.dirname(os.path.dirname(__file__))
 
     try:
-        interpreter = subprocess.Popen(
-            [sys.executable, os.path.join(root, "services", "data-pipeline", "interpreter", "semantic_agent.py")],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            env={**os.environ, "PYTHONPATH": os.path.join(root, "services", "config")}
-        )
-        procs.append(("interpreter", interpreter))
+        # Only start interpreter if port 5561 is not already listening
+        if not wait_for_port(5561, timeout=0.5):
+            interpreter = subprocess.Popen(
+                [sys.executable, os.path.join(root, "services", "data-pipeline", "interpreter", "semantic_agent.py")],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env={**os.environ, "PYTHONPATH": os.path.join(root, "services", "config")}
+            )
+            procs.append(("interpreter", interpreter))
 
-        fusion = subprocess.Popen(
-            [sys.executable, os.path.join(root, "services", "data-pipeline", "fusion", "fusion_engine.py")],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            env={**os.environ, "PYTHONPATH": os.path.join(root, "services", "config")}
-        )
-        procs.append(("fusion", fusion))
+        # Only start fusion if port 5556 is not already listening
+        if not wait_for_port(5556, timeout=0.5):
+            fusion = subprocess.Popen(
+                [sys.executable, os.path.join(root, "services", "data-pipeline", "fusion", "fusion_engine.py")],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env={**os.environ, "PYTHONPATH": os.path.join(root, "services", "config")}
+            )
+            procs.append(("fusion", fusion))
 
-        # Wait for components to bind their ports
+        # Wait for components to bind their ports (whether we started them or they were already there)
         print("\n⏳ Waiting for pipeline components to bind ports...")
         if not wait_for_port(5561, timeout=5.0):
             print("❌ Interpreter failed to bind port 5561")

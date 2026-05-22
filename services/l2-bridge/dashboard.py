@@ -191,8 +191,7 @@ class ScenarioEngine:
             if sc.scenario_id == scenario_id and sc.status == "simulated":
                 ctx = zmq.Context()
                 pub = ctx.socket(zmq.PUB)
-                pub.bind(ZMQ_PORTS["L1_PERTURBATION_PUB"])
-
+                pub.connect(ZMQ_PORTS["L1_PERTURBATION_SUB"])  # FIXED: connect, not bind
                 time.sleep(0.3)  # slow-joiner guard
 
                 for agent_name, outcome in (sc.predicted_outcome or {}).items():
@@ -339,7 +338,7 @@ def direct_perturb():
 
     ctx = zmq.Context()
     pub = ctx.socket(zmq.PUB)
-    pub.bind(ZMQ_PORTS["L1_PERTURBATION_PUB"])
+    pub.connect(ZMQ_PORTS["L1_PERTURBATION_SUB"])  # NOTE: connect, not bind
     time.sleep(0.3)
 
     payload = {

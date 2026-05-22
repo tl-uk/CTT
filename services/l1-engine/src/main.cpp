@@ -2,6 +2,7 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <cstdlib>   // std::getenv
 #include "SimulationEngine.h"
 #include "DataBridge.h"
 
@@ -10,7 +11,11 @@ int main() {
     
     CTT::SimulationEngine engine;
     // PUB on 5555 (telemetry out), SUB on 5556 (perturbations in)
-    CTT::DataBridge bridge("tcp://*:5555", "tcp://localhost:5556");
+    const char* fusion_host = std::getenv("CTT_FUSION_HOST");
+    std::string sub_addr = "tcp://";
+    sub_addr += (fusion_host ? fusion_host : "localhost");
+    sub_addr += ":5556";
+    CTT::DataBridge bridge("tcp://*:5555", sub_addr);
 
     engine.initialize_test_fleet();
 

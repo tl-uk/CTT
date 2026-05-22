@@ -170,7 +170,9 @@ def run_standalone_test():
     print("✅ C++ Engine telemetry detected on port 5555")
 
     # Check no existing pipeline processes that would cause port conflicts
-    for port in [5560, 5561]:
+    # NOTE: Only 5560 must be free (test acts as harvester and BINDS here).
+    #       5561/5556 may already be running (test connects to them as SUB).
+    for port in [5560]:
         if wait_for_port(port, timeout=0.5):
             print(f"⚠️  Port {port} already in use. Run 'make stop-pipeline' first.")
             sys.exit(1)

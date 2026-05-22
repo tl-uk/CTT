@@ -40,7 +40,7 @@ services:
       - ctt
     healthcheck:
       test:
-        - CMD-SHELL
+        - ["CMD", "nc", "-z", "localhost", "5560"]
         - python3 -c "import zmq; ctx=zmq.Context(); s=ctx.socket(zmq.PUB); s.bind('tcp://127.0.0.1:5560'); s.close(); ctx.term()" || exit 1
       interval: 10s
       timeout: 3s
@@ -60,7 +60,7 @@ services:
       - ctt
     healthcheck:
       test:
-        - CMD-SHELL
+        - ["CMD", "nc", "-z", "localhost", "5561"]
         - python3 -c "import zmq; ctx=zmq.Context(); s=ctx.socket(zmq.PUB); s.bind('tcp://127.0.0.1:5561'); s.close(); ctx.term()" || exit 1
       interval: 10s
       timeout: 3s
@@ -82,7 +82,7 @@ services:
       - ctt
     healthcheck:
       test:
-        - CMD-SHELL
+        - ["CMD", "nc", "-z", "localhost", "5556"]
         - python3 -c "import zmq; ctx=zmq.Context(); s=ctx.socket(zmq.PUB); s.bind('tcp://127.0.0.1:5556'); s.close(); ctx.term()" || exit 1
       interval: 10s
       timeout: 3s

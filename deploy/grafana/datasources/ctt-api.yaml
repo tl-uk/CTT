@@ -4,7 +4,7 @@ datasources:
   - name: CTT Dashboard API
     type: marcusolsson-json-datasource
     access: proxy
-    url: http://ctt-dashboard:5000/api/v1
+    url: http://ctt-dashboard:5001/api/v1
     isDefault: true
     editable: true
     jsonData:

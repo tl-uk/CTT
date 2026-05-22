@@ -107,7 +107,7 @@ def run_docker_test():
     # Check dashboard API
     print("\n🔍 Check 1: Dashboard API")
     try:
-        resp = requests.get("http://localhost:5000/health", timeout=5)
+        resp = requests.get("http://localhost:5001/health", timeout=5)
         if resp.status_code == 200:
             health = resp.json()
             print(f"   ✅ Dashboard healthy: {health}")

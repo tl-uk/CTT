@@ -249,6 +249,17 @@ run-fusion-bg: ## Run fusion in background
 	@$(call wait-for-port,5556,fusion)
 
 # =============================================================================
+# Colima reset
+# =============================================================================
+colima-reset: ## Reset Colima VM to reclaim disk space (destructive)
+	@echo "🛑 Stopping and deleting Colima VM..."
+	@colima stop 2>/dev/null || true
+	@colima delete 2>/dev/null || true
+	@echo "🚀 Starting fresh Colima VM..."
+	@colima start --cpu 4 --memory 8 --disk 30
+	@echo "✅ Colima reset complete. Rebuild with: docker-compose up --build -d"
+
+# =============================================================================
 # Testing & Verification
 # =============================================================================
 

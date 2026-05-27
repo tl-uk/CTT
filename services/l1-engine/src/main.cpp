@@ -3,11 +3,18 @@
 #include <chrono>
 #include <thread>
 #include <cstdlib>   // std::getenv
+#include <ctime>     // std::time (for jitter seed)
 #include "SimulationEngine.h"
 #include "DataBridge.h"
 
 int main() {
     std::cout << "--- CTT Master Engine Online ---" << std::endl;
+    
+    // Phase 6 TODO: Seed RNG for per-agent Schmitt Trigger jitter
+    // (±5% threshold variance prevents thundering-herd decarbonisation).
+    // Requires SimulationEngine.cpp modification:
+    //   threshold = base * (1.0 + ((rand() % 11) - 5) / 100.0);
+    // std::srand(std::time(nullptr));
     
     CTT::SimulationEngine engine;
     // PUB on 5555 (telemetry out), SUB on 5556 (perturbations in)
@@ -31,6 +38,9 @@ int main() {
         last_time = current_time;
 
         // 1. Tick the Flecs Reflexive Engine
+        // Phase 6 NOTE: For true stratified compute, migrate to ecs_progress
+        // with pipeline phases (EcsPreUpdate=physics, EcsOnUpdate=BDI,
+        // EcsPostUpdate=telemetry) instead of a single update() call.
         engine.update(delta_time);
 
         // 2. Receive perturbations from Python pipeline and apply to the world

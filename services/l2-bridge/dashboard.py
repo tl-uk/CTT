@@ -16,7 +16,8 @@ import zmq
 from flask import Flask, jsonify, request
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "config"))
-from ports import ZMQ_PORTS
+from ports import ZMQ_PORTS, get_resilient_socket
+from settings import config
 
 # =============================================================================
 # Configuration
@@ -75,7 +76,7 @@ class TelemetryCollector:
 
     def _run(self):
         ctx = zmq.Context()
-        sub = ctx.socket(zmq.SUB)
+        sub = get_resilient_socket(ctx, zmq.SUB, is_sub=True)
 
         # Connect to engine telemetry with retry
         telemetry_addr = ZMQ_PORTS.get("L1_TELEMETRY_SUB", "tcp://localhost:5555")
@@ -190,8 +191,8 @@ class ScenarioEngine:
         for sc in self.scenarios:
             if sc.scenario_id == scenario_id and sc.status == "simulated":
                 ctx = zmq.Context()
-                pub = ctx.socket(zmq.PUB)
-                pub.connect(ZMQ_PORTS["L1_PERTURBATION_SUB"])  # FIXED: connect, not bind
+                pub = get_resilient_socket(ctx, zmq.PUB)
+                pub.connect(ZMQ_PORTS["L1_PERTURBATION_SUB"])
                 time.sleep(0.3)  # slow-joiner guard
 
                 for agent_name, outcome in (sc.predicted_outcome or {}).items():
@@ -223,17 +224,68 @@ class ScenarioEngine:
 
 
 # =============================================================================
+# Policy Subscriber (Phase 6 — L5 Structural Feedback)
+# =============================================================================
+
+class PolicySubscriber:
+    """
+    Listens to L5 Federation Bridge on ZMQ POLICY_SUB (5563).
+    Receives slow-varying structural policies (e.g., toll discounts)
+    and logs them. In future, this feeds directly into ScenarioEngine.
+    """
+    def __init__(self):
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        import threading
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        ctx = zmq.Context()
+        sub = get_resilient_socket(ctx, zmq.SUB, is_sub=True)
+        policy_addr = ZMQ_PORTS.get("POLICY_SUB", "tcp://localhost:5563")
+        try:
+            sub.connect(policy_addr)
+        except zmq.ZMQError:
+            pass
+        sub.setsockopt_string(zmq.SUBSCRIBE, "")
+        print(f"[PolicySubscriber] Listening for structural policies on {policy_addr}")
+
+        while self._running:
+            try:
+                msg = sub.recv_string()
+                data = json.loads(msg)
+                print(f"[PolicySubscriber] 🏛️ Structural policy received: {data}")
+                # Future: merge into ScenarioEngine as standing parameter offset
+            except zmq.error.Again:
+                continue
+            except Exception as e:
+                print(f"[PolicySubscriber] Error: {e}")
+        sub.close()
+        ctx.term()
+
+    def stop(self):
+        self._running = False
+
+
+# =============================================================================
 # Flask App
 # =============================================================================
 
 app = Flask(__name__)
 collector = TelemetryCollector()
 scenarios = ScenarioEngine(collector)
+policy_sub = PolicySubscriber()
 
-# EAGER START: Start collector immediately at module load time
-# This ensures the healthcheck passes even before first HTTP request
+# EAGER START: Start collector and policy listener immediately
 collector.start()
-print("[Dashboard] Telemetry collector started eagerly")
+policy_sub.start()
+print("[Dashboard] Telemetry collector + Policy subscriber started eagerly")
 
 
 # -----------------------------------------------------------------------------
@@ -337,8 +389,8 @@ def direct_perturb():
     pressure_delta = float(data.get("pressure_delta", 0))
 
     ctx = zmq.Context()
-    pub = ctx.socket(zmq.PUB)
-    pub.connect(ZMQ_PORTS["L1_PERTURBATION_SUB"])  # NOTE: connect, not bind
+    pub = get_resilient_socket(ctx, zmq.PUB)
+    pub.connect(ZMQ_PORTS["L1_PERTURBATION_SUB"])
     time.sleep(0.3)
 
     payload = {
@@ -366,4 +418,6 @@ if __name__ == "__main__":
     # Already started eagerly above, but ensure it's running
     if not collector._running:
         collector.start()
+    if not policy_sub._running:
+        policy_sub.start()
     app.run(host="0.0.0.0", port=5001, debug=False)

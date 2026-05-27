@@ -54,6 +54,19 @@ class CTTConfig:
     MAPTILER_API_KEY = os.getenv("MAPTILER_API_KEY", "")
     OPENAIP_API_KEY = os.getenv("OPENAIP_API_KEY", "")
 
+    # =============================================================================
+    # Phase 6 — L5 Macro & Federation
+    # =============================================================================
+    KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
+    KAFKA_TELEMETRY_TOPIC = os.getenv("KAFKA_TELEMETRY_TOPIC", "ctt.telemetry.raw")
+    KAFKA_PERTURBATION_TOPIC = os.getenv("KAFKA_PERTURBATION_TOPIC", "ctt.perturbation.applied")
+    KAFKA_POLICY_TOPIC = os.getenv("KAFKA_POLICY_TOPIC", "ctt.policy.structural")
+    KAFKA_CONSUMER_GROUP = os.getenv("KAFKA_CONSUMER_GROUP", "ctt-l5-macro")
+
+    # City federation identity
+    CTT_CITY_ID = os.getenv("CTT_CITY_ID", "city-01")
+    CTT_REGION = os.getenv("CTT_REGION", "uk-southeast")
+
     def validate(self) -> list[str]:
         errors = []
         if self.HARVESTER_MODE == "transitland" and not self.TRANSITLAND_API_KEY:

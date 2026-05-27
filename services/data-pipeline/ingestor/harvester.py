@@ -25,6 +25,19 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "config"))
 from settings import config
 
+# In harvester.py or a new ingestor adapter
+class GTFSRailDelayAdapter:
+    def pull(self) -> list[dict]:
+        # Fetch from GTFS-RT
+        # Return canonical CTT event format
+        return [{
+            "event_type": "transit_delay",
+            "route": "Dover-London",
+            "delay_min": 45,
+            "source": "southeastern_gtfs",
+            "timestamp": "2026-05-26T12:00:00Z",
+        }]
+
 def main():
     parser = argparse.ArgumentParser(description="CTT Data Harvester")
     parser.add_argument(

@@ -2,9 +2,7 @@
 """
 services/l5-macro/federation_bridge.py
 
-Phase 6 — L5 Macro & Federation Bridge (ZMQ-only).
-Consumes telemetry directly from ZMQ 5555, evaluates structural policy,
-and emits to ZMQ POLICY_PUB (5563).
+Phase 6 — L5 Macro & Federation Bridge (ZMQ-only, audit-logger pattern).
 """
 import json
 import os
@@ -31,38 +29,32 @@ class FederationBridge:
         self.tele_sub = get_resilient_socket(self.ctx, zmq.SUB, is_sub=True)
         self.tele_sub.connect(ZMQ_TELEMETRY_SUB)
         self.tele_sub.setsockopt_string(zmq.SUBSCRIBE, "")
-        # CRITICAL: Allow slow-joiner synchronization
-        time.sleep(1.0)  # Give ZMQ time to establish subscription
         self._running = False
         self.window = defaultdict(list)
 
     def run(self):
         print(f"[FederationBridge] Online | city={CITY_ID} | ZMQ mode")
         print(f"[FederationBridge] ZMQ policy pub: {ZMQ_POLICY_PUB}")
+        print(f"[FederationBridge] ZMQ telemetry sub: {ZMQ_TELEMETRY_SUB}")
         print("[FederationBridge] L5 → L2 feedback loop active")
-        
-        # Use Poller + blocking recv with timeout (correct SUB pattern)
-        poller = zmq.Poller()
-        poller.register(self.tele_sub, zmq.POLLIN)
+        time.sleep(1.0)
         
         self._running = True
         last_eval = time.time()
 
         while self._running:
-            # Block up to 1s waiting for telemetry
-            socks = dict(poller.poll(timeout=1000))
-            
-            if self.tele_sub in socks:
-                try:
-                    msg = self.tele_sub.recv_string()
-                    data = json.loads(msg)
-                    if isinstance(data, list):
-                        for agent in data:
-                            city = agent.get("city_id", "unknown")
-                            pressure = agent.get("adversarial_pressure", 0)
-                            self.window[city].append(pressure)
-                except Exception as e:
-                    print(f"[FederationBridge] Parse error: {e}")
+            try:
+                msg = self.tele_sub.recv_string()
+                data = json.loads(msg)
+                if isinstance(data, list):
+                    for agent in data:
+                        city = agent.get("city_id", "unknown")
+                        pressure = agent.get("adversarial_pressure", 0)
+                        self.window[city].append(pressure)
+            except zmq.error.Again:
+                pass
+            except Exception as e:
+                print(f"[FederationBridge] Parse error: {e}")
 
             if time.time() - last_eval >= 30:
                 self._evaluate_and_emit()
@@ -94,8 +86,11 @@ class FederationBridge:
                     "reason": f"avg_pressure_exceeded_60 (actual={avg_pressure:.1f})",
                 }
             }
-            self.policy_pub.send_string(json.dumps(policy))
-            print(f"[FederationBridge] 🏛️ EMITTED local policy: pressure_cap=75.0")
+            try:
+                self.policy_pub.send_string(json.dumps(policy))
+                print(f"[FederationBridge] 🏛️ EMITTED local policy: pressure_cap=75.0")
+            except Exception as e:
+                print(f"[FederationBridge] ZMQ publish failed: {e}")
 
     def stop(self):
         self._running = False

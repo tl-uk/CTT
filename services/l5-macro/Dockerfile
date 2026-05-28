@@ -5,6 +5,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Unbuffered stdout so docker logs -f shows prints immediately
+ENV PYTHONUNBUFFERED=1
+
 # Install librdkafka headers + build tools for confluent-kafka Python wheel
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
@@ -15,7 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python dependencies
 RUN pip install --no-cache-dir \
     confluent-kafka \
-    pyzmq
+    pyzmq \
+    python-dotenv
 
 # Copy shared configuration
 COPY services/config /app/services/config

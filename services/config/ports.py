@@ -5,6 +5,7 @@ Keep in sync with services/l1-engine/include/PortConfig.h
 """
 
 import os
+import zmq
 
 # =============================================================================
 # Docker / Container Networking Overrides

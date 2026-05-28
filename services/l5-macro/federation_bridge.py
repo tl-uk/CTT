@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 services/l5-macro/federation_bridge.py
 
@@ -19,7 +20,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "config"))
 
 import zmq
-from confluent_kafka import Consumer, Producer
+from confluent_kafka import Consumer, Producer, KafkaException
 
 from ports import ZMQ_PORTS, get_resilient_socket
 from settings import config
@@ -42,65 +43,106 @@ ZMQ_POLICY_PUB = ZMQ_PORTS.get("POLICY_PUB", "tcp://*:5563")
 
 class FederationBridge:
     def __init__(self):
-        self.consumer = Consumer({
-            "bootstrap.servers": KAFKA_BOOTSTRAP,
-            "group.id": f"{GROUP_ID}-federation",
-            "auto.offset.reset": "latest",
-            "enable.auto.commit": True,
-            "session.timeout.ms": 6000,
-        })
-        self.consumer.subscribe([TELEMETRY_TOPIC])
-
-        self.producer = Producer({
-            "bootstrap.servers": KAFKA_BOOTSTRAP,
-            "client.id": f"ctt-federation-{CITY_ID}",
-            "queue.buffering.max.ms": 1000,
-        })
-
+        self.consumer = None
+        self.producer = None
         self.ctx = zmq.Context()
         self.policy_pub = get_resilient_socket(self.ctx, zmq.PUB)
         self.policy_pub.bind(ZMQ_POLICY_PUB)
-
         self._running = False
-        self.window = defaultdict(list)  # city_id -> list of pressures
+        self.window = defaultdict(list)
 
     def _delivery_report(self, err, msg):
         if err:
             print(f"[FederationBridge] Kafka delivery failed: {err}")
 
+    def _init_kafka(self, retries: int = 5, delay: float = 3.0):
+        """Lazy Kafka init. Prints status so docker logs -f is never empty."""
+        for attempt in range(1, retries + 1):
+            try:
+                self.consumer = Consumer({
+                    "bootstrap.servers": KAFKA_BOOTSTRAP,
+                    "group.id": f"{GROUP_ID}-federation",
+                    "auto.offset.reset": "latest",
+                    "enable.auto.commit": True,
+                    "session.timeout.ms": 6000,
+                    "socket.timeout.ms": 5000,
+                    "metadata.max.age.ms": 5000,
+                })
+                self.consumer.subscribe([TELEMETRY_TOPIC])
+
+                self.producer = Producer({
+                    "bootstrap.servers": KAFKA_BOOTSTRAP,
+                    "client.id": f"ctt-federation-{CITY_ID}",
+                    "queue.buffering.max.ms": 1000,
+                    "socket.timeout.ms": 5000,
+                })
+                # Test metadata fetch
+                self.consumer.poll(timeout=1)
+                print(f"[FederationBridge] ✅ Kafka consumer/producer ready ({KAFKA_BOOTSTRAP})")
+                return True
+            except Exception as e:
+                print(f"[FederationBridge] ⚠️ Kafka init attempt {attempt}/{retries}: {e}")
+                time.sleep(delay)
+        print("[FederationBridge] ❌ Kafka unavailable — policy evaluation suspended")
+        return False
+
     def run(self):
+        # --- Startup banner (must appear immediately in docker logs) ---
         print(f"[FederationBridge] Online | city={CITY_ID}")
-        print(f"[FederationBridge] Kafka consumer: {TELEMETRY_TOPIC}")
         print(f"[FederationBridge] ZMQ policy pub: {ZMQ_POLICY_PUB}")
         print("[FederationBridge] L5 → L2 feedback loop active")
-
-        self._running = True
+        # --- lazy Kafka init (non-blocking) ---
+        kafka_ready = self._init_kafka()
+        if not kafka_ready:
+            print("[FederationBridge] ⚠️ Starting in ZMQ-only mode (Kafka unavailable)")
+        
         last_eval = time.time()
+        consecutive_errors = 0
 
         try:
             while self._running:
-                msg = self.consumer.poll(timeout=1.0)
-                if msg is None:
-                    pass
-                elif msg.error():
-                    print(f"[FederationBridge] Kafka error: {msg.error()}")
-                else:
+                if kafka_ready and self.consumer:
                     try:
-                        data = json.loads(msg.value().decode("utf-8"))
-                        payload = data.get("payload", {})
-                        city = payload.get("city_id", "unknown")
-                        pressure = payload.get("adversarial_pressure", 0)
-                        self.window[city].append(pressure)
-                    except Exception:
-                        pass
+                        msg = self.consumer.poll(timeout=1.0)
+                        consecutive_errors = 0  # Reset on success
+                        
+                        if msg is None:
+                            pass
+                        elif msg.error():
+                            print(f"[FederationBridge] Kafka error: {msg.error()}")
+                        else:
+                            try:
+                                data = json.loads(msg.value().decode("utf-8"))
+                                payload = data.get("payload", {})
+                                city = payload.get("city_id", "unknown")
+                                pressure = payload.get("adversarial_pressure", 0)
+                                self.window[city].append(pressure)
+                            except Exception as e:
+                                print(f"[FederationBridge] Parse error: {e}")
 
-                # Evaluate every 30 seconds
+                    except Exception as e:
+                        consecutive_errors += 1
+                        print(f"[FederationBridge] ⚠️ Consumer poll failed ({consecutive_errors}): {e}")
+                        if consecutive_errors >= 10:
+                            print("[FederationBridge] ❌ Too many errors — backing off to ZMQ-only for 60s")
+                            kafka_ready = False
+                            try:
+                                self.consumer.close()
+                            except Exception:
+                                pass
+                            self.consumer = None
+                            time.sleep(60)
+                            kafka_ready = self._init_kafka()
+                            consecutive_errors = 0
+
+                # Evaluate every 30 seconds regardless of Kafka state
                 if time.time() - last_eval >= 30:
                     self._evaluate_and_emit()
                     last_eval = time.time()
-
+        # Graceful shutdown on Ctrl+C
         finally:
-            self.consumer.close()
+            if self.consumer:
+                self.consumer.close()
             self.policy_pub.close()
             self.ctx.term()
 
@@ -136,17 +178,16 @@ class FederationBridge:
                 }
             }
 
-            # Emit to local L2 via ZMQ
             self.policy_pub.send_string(json.dumps(policy))
             print(f"[FederationBridge] 🏛️ EMITTED local policy: pressure_cap=75.0")
 
-            # Emit to Kafka for other cities / national twin
-            self.producer.produce(
-                POLICY_TOPIC,
-                value=json.dumps(policy).encode(),
-                callback=self._delivery_report,
-            )
-            self.producer.poll(0)
+            if self.producer:
+                self.producer.produce(
+                    POLICY_TOPIC,
+                    value=json.dumps(policy).encode(),
+                    callback=self._delivery_report,
+                )
+                self.producer.poll(0)
 
     def stop(self):
         self._running = False

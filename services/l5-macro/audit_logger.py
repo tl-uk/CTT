@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 services/l5-macro/audit_logger.py
 
@@ -17,7 +18,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "config"))
 
 import zmq
-from confluent_kafka import Producer
+from confluent_kafka import Producer, KafkaException
 
 from ports import ZMQ_PORTS, get_resilient_socket
 from settings import config
@@ -39,21 +40,13 @@ REGION = config.CTT_REGION
 
 class AuditLogger:
     def __init__(self):
-        self.producer = Producer({
-            "bootstrap.servers": KAFKA_BOOTSTRAP,
-            "client.id": f"ctt-audit-{CITY_ID}",
-            "queue.buffering.max.messages": 5000,
-            "queue.buffering.max.ms": 500,
-            "compression.type": "lz4",
-            "message.timeout.ms": 1000,  # Drop if Kafka unavailable
-        })
+        self.producer = None
         self._running = False
         self._last_states = {}
 
     def _delivery_report(self, err, msg):
         if err:
-            # Cold path: silent fail
-            pass
+            pass  # Cold path: silent fail
 
     def _envelope(self, event_type: str, payload: dict) -> dict:
         return {
@@ -67,21 +60,50 @@ class AuditLogger:
             "payload": payload,
         }
 
-    def run(self):
-        ctx = zmq.Context()
+    def _init_kafka(self, retries: int = 5, delay: float = 3.0):
+        """Lazy Kafka Producer init with retry. Never blocks ZMQ loop."""
+        for attempt in range(1, retries + 1):
+            try:
+                self.producer = Producer({
+                    "bootstrap.servers": KAFKA_BOOTSTRAP,
+                    "client.id": f"ctt-audit-{CITY_ID}",
+                    "queue.buffering.max.messages": 5000,
+                    "queue.buffering.max.ms": 500,
+                    "compression.type": "lz4",
+                    "message.timeout.ms": 1000,
+                    "socket.timeout.ms": 5000,
+                    "metadata.max.age.ms": 5000,
+                    # Suppress noisy librdkafka connection logs
+                    "log_level": 4,  # ERROR only (0=EMERG, 6=DEBUG)
+                })
+                self.producer.poll(timeout=1)
+                print(f"[AuditLogger] ✅ Kafka producer ready ({KAFKA_BOOTSTRAP})")
+                return True
+            except Exception as e:
+                print(f"[AuditLogger] ⚠️ Kafka init attempt {attempt}/{retries}: {e}")
+                time.sleep(delay)
+        print("[AuditLogger] ❌ Kafka unavailable — running ZMQ-only (cold path)")
+        return False
 
-        # SUB to telemetry (5555)
+    def run(self):
+        # --- Startup banner (must appear immediately in docker logs) ---
+        print(f"[AuditLogger] Online | city={CITY_ID} | region={REGION}")
+        print("[AuditLogger] COLD PATH — dropped messages do not affect real-time loop")
+
+        # --- ZMQ setup (hot path, never blocks) ---
+        ctx = zmq.Context()
         tele_sub = get_resilient_socket(ctx, zmq.SUB, is_sub=True)
         tele_sub.connect(ZMQ_PORTS.get("L1_TELEMETRY_SUB", "tcp://localhost:5555"))
         tele_sub.setsockopt_string(zmq.SUBSCRIBE, "")
 
-        # SUB to perturbations (5556) — observe Fusion output
         pert_sub = get_resilient_socket(ctx, zmq.SUB, is_sub=True)
         pert_sub.connect(ZMQ_PORTS.get("L1_PERTURBATION_SUB", "tcp://localhost:5556"))
         pert_sub.setsockopt_string(zmq.SUBSCRIBE, "")
 
-        print(f"[AuditLogger] Online | city={CITY_ID} | kafka={KAFKA_BOOTSTRAP}")
-        print("[AuditLogger] COLD PATH — dropped messages do not affect real-time loop")
+        print("[AuditLogger] ZMQ subscribers connected")
+
+        # --- Kafka setup (cold path, lazy init) ---
+        self._init_kafka()
 
         poller = zmq.Poller()
         poller.register(tele_sub, zmq.POLLIN)
@@ -104,12 +126,12 @@ class AuditLogger:
                             was_decarb = self._last_states.get(name, {}).get("is_decarbonized", False)
                             now_decarb = agent.get("is_decarbonized", False)
 
-                            # Always log telemetry
-                            self.producer.produce(
-                                TELEMETRY_TOPIC,
-                                value=json.dumps(self._envelope("telemetry", agent)).encode(),
-                                callback=self._delivery_report,
-                            )
+                            if self.producer:
+                                self.producer.produce(
+                                    TELEMETRY_TOPIC,
+                                    value=json.dumps(self._envelope("telemetry", agent)).encode(),
+                                    callback=self._delivery_report,
+                                )
 
                             if now_decarb and not was_decarb:
                                 decision = self._envelope("decision", {
@@ -118,11 +140,12 @@ class AuditLogger:
                                     "adversarial_pressure": agent.get("adversarial_pressure"),
                                     "timestamp": agent.get("timestamp"),
                                 })
-                                self.producer.produce(
-                                    DECISION_TOPIC,
-                                    value=json.dumps(decision).encode(),
-                                    callback=self._delivery_report,
-                                )
+                                if self.producer:
+                                    self.producer.produce(
+                                        DECISION_TOPIC,
+                                        value=json.dumps(decision).encode(),
+                                        callback=self._delivery_report,
+                                    )
                                 print(f"[AuditLogger] 🌱 {name} DECARBONIZED (pressure={agent.get('adversarial_pressure')})")
 
                             self._last_states[name] = agent
@@ -137,20 +160,23 @@ class AuditLogger:
                         except json.JSONDecodeError:
                             payload = {"raw_hex": raw.hex(), "note": "protobuf_binary"}
 
-                        envelope = self._envelope("perturbation", payload)
-                        self.producer.produce(
-                            PERTURBATION_TOPIC,
-                            value=json.dumps(envelope).encode(),
-                            callback=self._delivery_report,
-                        )
+                        if self.producer:
+                            envelope = self._envelope("perturbation", payload)
+                            self.producer.produce(
+                                PERTURBATION_TOPIC,
+                                value=json.dumps(envelope).encode(),
+                                callback=self._delivery_report,
+                            )
                     except Exception:
                         pass
 
-                self.producer.poll(0)
+                if self.producer:
+                    self.producer.poll(0)
 
         finally:
-            print("[AuditLogger] Flushing...")
-            self.producer.flush(timeout=2)
+            print("[AuditLogger] Shutting down...")
+            if self.producer:
+                self.producer.flush(timeout=2)
             tele_sub.close()
             pert_sub.close()
             ctx.term()

@@ -144,15 +144,14 @@ services:
         limits:
           memory: 256M
 
-    kafka:
-    image: confluentinc/cp-kafka:latest
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
     container_name: ctt-kafka
     depends_on:
       - zookeeper
     ports:
       - "9092:9092"
     environment:
-      # Actual Zookeeper mode configuration
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
@@ -161,10 +160,6 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_HEAP_OPTS: -Xmx384M -Xms384M
-      # Dummy KRaft vars to satisfy Confluent entrypoint script
-      KAFKA_PROCESS_ROLES: broker
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:29093
-      CLUSTER_ID: ctt-dummy-cluster-01
     networks:
       - ctt
     restart: unless-stopped

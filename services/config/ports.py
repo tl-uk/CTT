@@ -19,6 +19,7 @@ _INTERPRETER_HOST = os.getenv("CTT_INTERPRETER_HOST", "localhost")
 _FUSION_HOST = os.getenv("CTT_FUSION_HOST", "localhost")
 _L1_ENGINE_HOST = os.getenv("CTT_L1_ENGINE_HOST", "localhost")
 _POLICY_HOST = os.getenv("CTT_POLICY_HOST", "localhost")
+_TACTICAL_HOST = os.getenv("CTT_TACTICAL_HOST", "localhost")
 
 ZMQ_PORTS = {
     # L1 Engine
@@ -38,6 +39,10 @@ ZMQ_PORTS = {
     # Phase 6 — L5 Policy Bridge (structural feedback to L2/L3)
     "POLICY_PUB": "tcp://*:5563",
     "POLICY_SUB": f"tcp://{_POLICY_HOST}:5563",
+
+    # Phase 6.5 — L2 Orchestrator (tactical policies, separate from structural L5)
+    "TACTICAL_PUB": "tcp://*:5564",
+    "TACTICAL_SUB": f"tcp://{_TACTICAL_HOST}:5564",
 
     # Legacy / Direct (deprecated, non-conflicting)
     "LEGACY_INGESTOR_PUB": "tcp://*:5562",

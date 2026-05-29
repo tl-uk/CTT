@@ -3,6 +3,10 @@ services/l2-bridge/dashboard.py
 
 CTT Dashboard API — Control plane, telemetry query, and what-if scenario engine.
 Exposes REST endpoints for a Grafana or custom frontend.
+
+Phase 6.5 NOTE: Layer2Orchestrator now runs as a separate service
+(services/l2-orchestrator/) to avoid port conflicts and enable independent
+scaling. This file retains the PolicySubscriber for L5 structural feedback.
 """
 import json
 import os
@@ -260,7 +264,7 @@ class PolicySubscriber:
             try:
                 msg = sub.recv_string()
                 data = json.loads(msg)
-                print(f"[PolicySubscriber] 🏛️ Structural policy received: {data}")
+                print(f"[PolicySubscriber] Structural policy received: {data}")
                 # Future: merge into ScenarioEngine as standing parameter offset
             except zmq.error.Again:
                 continue
@@ -274,109 +278,6 @@ class PolicySubscriber:
 
 
 # =============================================================================
-# L2 Orchestrator (Phase 6 — Swarm Anomaly Detection)
-# =============================================================================
-
-class Layer2Orchestrator:
-    """
-    Runs inside the dashboard container as a daemon thread.
-    Detects swarm anomalies (3+ agents in same sector hitting pressure >= 80)
-    and emits tactical policy adjustments to mitigate cascading failures.
-    """
-    def __init__(self):
-        self._running = False
-        self._thread = None
-        self.agent_history = {}
-        self.sector_state = {}
-
-    def start(self):
-        import threading
-        if self._running:
-            return
-        self._running = True
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-        print("[Dashboard] L2 Orchestrator started eagerly")
-
-    def _run(self):
-        import threading
-        ctx = zmq.Context()
-        tele_sub = get_resilient_socket(ctx, zmq.SUB, is_sub=True)
-        tele_sub.connect(ZMQ_PORTS.get("L1_TELEMETRY_SUB", "tcp://localhost:5555"))
-        tele_sub.setsockopt_string(zmq.SUBSCRIBE, "")
-        tele_sub.set(zmq.RCVTIMEO, 2000)
-
-        policy_pub = get_resilient_socket(ctx, zmq.PUB)
-        policy_pub.connect(ZMQ_PORTS.get("POLICY_PUB", "tcp://localhost:5563"))
-        time.sleep(0.5)  # slow-joiner
-
-        print("[L2 Orchestrator] Online | ZMQ thread loop active")
-
-        while self._running:
-            try:
-                msg = tele_sub.recv_string()
-                agents = json.loads(msg)
-                self.update_windows(agents)
-                if self.detect_swarm_anomaly():
-                    self.emit_tactical_policy(policy_pub)
-            except json.JSONDecodeError as e:
-                print(f"[L2 Orchestrator] JSON parse error: {e}")
-            except Exception as e:
-                print(f"[L2 Orchestrator] Loop error: {e}")
-                time.sleep(0.1)
-
-        tele_sub.close()
-        policy_pub.close()
-        ctx.term()
-
-    def update_windows(self, agents):
-        import time
-        from collections import defaultdict, deque
-        now = time.time()
-        WINDOW_SIZE = 60
-        for agent in agents:
-            name = agent.get("entity_name", "unknown")
-            pressure = agent.get("adversarial_pressure", 0.0)
-            lat = agent.get("lat", 0.0)
-            lon = agent.get("lon", 0.0)
-            sector = f"{int(lat)},{int(lon)}"
-            if name not in self.agent_history:
-                self.agent_history[name] = deque(maxlen=WINDOW_SIZE)
-            self.agent_history[name].append((now, pressure, sector))
-
-    def detect_swarm_anomaly(self) -> bool:
-        from collections import defaultdict
-        ANOMALY_PRESSURE = 80.0
-        ANOMALY_COUNT = 3
-        sector_counts = defaultdict(int)
-        for name, window in self.agent_history.items():
-            if not window:
-                continue
-            _, pressure, sector = window[-1]
-            if pressure >= ANOMALY_PRESSURE:
-                sector_counts[sector] += 1
-        for sector, count in sector_counts.items():
-            if count >= ANOMALY_COUNT:
-                print(f"[L2 Orchestrator] 🚨 SWARM ANOMALY in sector {sector}: {count} agents >= {ANOMALY_PRESSURE}")
-                return True
-        return False
-
-    def emit_tactical_policy(self, pub_socket):
-        import time
-        policy = {
-            "sector": "SE1",
-            "pressure_cap": 75.0,
-            "source": "layer2_swarm_guard",
-            "timestamp": time.time(),
-        }
-        pub_socket.send_string(json.dumps(policy))
-        print(f"[L2 Orchestrator] 📤 Tactical policy emitted: {policy}")
-
-    def stop(self):
-        self._running = False
-
-
-# =============================================================================
 # Flask App
 # =============================================================================
 
@@ -384,13 +285,11 @@ app = Flask(__name__)
 collector = TelemetryCollector()
 scenarios = ScenarioEngine(collector)
 policy_sub = PolicySubscriber()
-# orch = Layer2Orchestrator()
 
-# EAGER START: Start collector, policy listener, and orchestrator immediately
+# EAGER START: Start collector and policy listener immediately
 collector.start()
 policy_sub.start()
-# orch.start()
-print("[Dashboard] Telemetry collector + Policy subscriber + Orchestrator started eagerly")
+print("[Dashboard] Telemetry collector + Policy subscriber started eagerly")
 
 
 # -----------------------------------------------------------------------------
@@ -525,6 +424,6 @@ if __name__ == "__main__":
         collector.start()
     if not policy_sub._running:
         policy_sub.start()
-    if not orch._running:
-        orch.start()
+    # Phase 6.5: Layer2Orchestrator now runs as a separate service
+    # (services/l2-orchestrator/orchestrator.py) to avoid port conflicts.
     app.run(host="0.0.0.0", port=5001, debug=False)

@@ -1,6 +1,6 @@
 # CTT Project Structure
 
-**Generated:** Fri May 29 14:09:08 BST 2026
+**Generated:** Fri May 29 19:39:09 BST 2026
 
 ```
 └── CTT
@@ -67,13 +67,26 @@
         │   ├── dashboard.py
         │   ├── orchestrator.py
         │   └── requirements.txt
+        ├── l2-orchestrator
+        │   ├── Dockerfile
+        │   ├── README.md
+        │   ├── orchestrator.py
+        │   └── requirements.txt
         ├── l3-analytics
         │   └── requirements.txt
         ├── l4-spatial
         │   └── README.md
-        └── l5-macro
+        ├── l5-macro
+        │   ├── Dockerfile
+        │   ├── __init__.py
+        │   ├── audit_logger.py
+        │   ├── federation_bridge.py
+        │   └── requirements.txt
+        └── l6-gaiax
             ├── Dockerfile
-            ├── __init__.py
-            ├── audit_logger.py
-            └── federation_bridge.py
+            ├── README.md
+            ├── edc_gateway.py
+            ├── policy_enforcer.py
+            ├── requirements.txt
+            └── self_description.json
 ```

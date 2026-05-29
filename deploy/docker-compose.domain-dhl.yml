@@ -1,103 +1,115 @@
 # =============================================================================
-# CTT Phase 6.5 — Production Stack + Standalone L2 Orchestrator
-# Location: deploy/docker-compose.yml
-# Usage: docker-compose -f deploy/docker-compose.yml up --build
+# CTT Phase 6.5 — Multi-Stakeholder Domain: DHL (domain-dhl)
+# Location: deploy/docker-compose.domain-dhl.yml
+# Usage:
+#   docker-compose -f deploy/docker-compose.yml up -d
+#   docker-compose -f deploy/docker-compose.domain-dhl.yml up -d
+#
+# This compose demonstrates plug-and-use federation:
+#   - DHL runs its own CTT stack on shifted ports
+#   - DfT (default compose) and DHL federate via ZMQ without schema changes
+#   - Either domain can disconnect and reconnect without breaking the other
 # =============================================================================
 
 services:
-  engine:
+  engine-dhl:
     build:
       context: ..
       dockerfile: services/l1-engine/Dockerfile
-    container_name: ctt-engine
+    container_name: ctt-engine-dhl
     ports:
-      - "5555:5555"
-      - "27750:27750"
+      - "5557:5557"
+      - "27751:27750"
     environment:
-      - CTT_L1_ENGINE_HOST=engine
-      - CTT_FUSION_HOST=fusion
+      - CTT_L1_ENGINE_HOST=engine-dhl
+      - CTT_FUSION_HOST=fusion-dhl
+      - CTT_DOMAIN_ID=domain-dhl
     networks:
-      - ctt
+      - ctt-dhl
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "5555"]
+      test: ["CMD", "nc", "-z", "localhost", "5557"]
       interval: 5s
       timeout: 2s
       start_period: 15s
       retries: 5
     restart: unless-stopped
 
-  harvester:
+  harvester-dhl:
     build:
       context: ..
       dockerfile: services/data-pipeline/ingestor/Dockerfile
-    container_name: ctt-harvester
+    container_name: ctt-harvester-dhl
     environment:
       - HARVESTER_MODE=mock
       - HARVESTER_POLL_INTERVAL=5
-      - CTT_HARVESTER_HOST=harvester
-      - CTT_INTERPRETER_HOST=interpreter
+      - CTT_HARVESTER_HOST=harvester-dhl
+      - CTT_INTERPRETER_HOST=interpreter-dhl
+      - CTT_DOMAIN_ID=domain-dhl
     networks:
-      - ctt
+      - ctt-dhl
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "5560"]
+      test: ["CMD", "nc", "-z", "localhost", "5565"]
       interval: 10s
       timeout: 3s
       retries: 3
     restart: unless-stopped
 
-  interpreter:
+  interpreter-dhl:
     build:
       context: ..
       dockerfile: services/data-pipeline/interpreter/Dockerfile
-    container_name: ctt-interpreter
+    container_name: ctt-interpreter-dhl
     environment:
-      - CTT_HARVESTER_HOST=harvester
-      - CTT_INTERPRETER_HOST=interpreter
-      - CTT_FUSION_HOST=fusion
+      - CTT_HARVESTER_HOST=harvester-dhl
+      - CTT_INTERPRETER_HOST=interpreter-dhl
+      - CTT_FUSION_HOST=fusion-dhl
+      - CTT_DOMAIN_ID=domain-dhl
     networks:
-      - ctt
+      - ctt-dhl
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "5561"]
+      test: ["CMD", "nc", "-z", "localhost", "5566"]
       interval: 10s
       timeout: 3s
       retries: 3
     restart: unless-stopped
 
-  fusion:
+  fusion-dhl:
     build:
       context: ..
       dockerfile: services/data-pipeline/fusion/Dockerfile
-    container_name: ctt-fusion
+    container_name: ctt-fusion-dhl
     ports:
-      - "5556:5556"
+      - "5558:5558"
     environment:
-      - CTT_INTERPRETER_HOST=interpreter
-      - CTT_FUSION_HOST=fusion
-      - CTT_L1_ENGINE_HOST=engine
+      - CTT_INTERPRETER_HOST=interpreter-dhl
+      - CTT_FUSION_HOST=fusion-dhl
+      - CTT_L1_ENGINE_HOST=engine-dhl
+      - CTT_DOMAIN_ID=domain-dhl
     networks:
-      - ctt
+      - ctt-dhl
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "5556"]
+      test: ["CMD", "nc", "-z", "localhost", "5558"]
       interval: 10s
       timeout: 3s
       retries: 3
     restart: unless-stopped
 
-  dashboard:
+  dashboard-dhl:
     build:
       context: ..
       dockerfile: services/l2-bridge/Dockerfile
-    container_name: ctt-dashboard
+    container_name: ctt-dashboard-dhl
     ports:
-      - "5001:5001"
+      - "5002:5001"
     environment:
-      - CTT_L1_ENGINE_HOST=engine
-      - CTT_FUSION_HOST=fusion
-      - CTT_POLICY_HOST=federation-bridge
-      - CTT_TACTICAL_HOST=orchestrator
+      - CTT_L1_ENGINE_HOST=engine-dhl
+      - CTT_FUSION_HOST=fusion-dhl
+      - CTT_POLICY_HOST=federation-bridge-dhl
+      - CTT_TACTICAL_HOST=orchestrator-dhl
       - PYTHONPATH=/app/services/config:/app/services/l2-bridge
+      - CTT_DOMAIN_ID=domain-dhl
     networks:
-      - ctt
+      - ctt-dhl
     healthcheck:
       test:
         - CMD-SHELL
@@ -108,29 +120,26 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Phase 6.5 — L2 Orchestrator (separate container, clean failure isolation)
-  # Binds TACTICAL_PUB on 5564; consumes L1 telemetry; emits tactical policies.
-  # ---------------------------------------------------------------------------
-  orchestrator:
+  orchestrator-dhl:
     build:
       context: ..
       dockerfile: services/l2-orchestrator/Dockerfile
-    container_name: ctt-orchestrator
+    container_name: ctt-orchestrator-dhl
     ports:
-      - "5564:5564"
+      - "5568:5564"
     environment:
-      - CTT_L1_ENGINE_HOST=engine
-      - CTT_FUSION_HOST=fusion
-      - CTT_POLICY_HOST=federation-bridge
-      - CTT_TACTICAL_HOST=orchestrator
+      - CTT_L1_ENGINE_HOST=engine-dhl
+      - CTT_FUSION_HOST=fusion-dhl
+      - CTT_POLICY_HOST=federation-bridge-dhl
+      - CTT_TACTICAL_HOST=orchestrator-dhl
       - PYTHONPATH=/app/services/config:/app/services/l2-orchestrator
+      - CTT_DOMAIN_ID=domain-dhl
     networks:
-      - ctt
+      - ctt-dhl
     depends_on:
-      engine:
+      engine-dhl:
         condition: service_healthy
-      fusion:
+      fusion-dhl:
         condition: service_healthy
     restart: unless-stopped
     deploy:
@@ -138,92 +147,90 @@ services:
         limits:
           memory: 128M
 
-  grafana:
+  grafana-dhl:
     image: grafana/grafana:latest
-    container_name: ctt-grafana
+    container_name: ctt-grafana-dhl
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - GF_INSTALL_PLUGINS=marcusolsson-json-datasource
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=ctt-admin-2026
-      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_SERVER_ROOT_URL=http://localhost:3001
     volumes:
-      - grafana_storage:/var/lib/grafana
+      - grafana_storage_dhl:/var/lib/grafana
       - ../deploy/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ../deploy/grafana/datasources:/etc/grafana/provisioning/datasources:ro
     networks:
-      - ctt
+      - ctt-dhl
     depends_on:
-      dashboard:
+      dashboard-dhl:
         condition: service_healthy
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Phase 6 — Kafka Core (Zookeeper mode — stable on Colima)
-  # ---------------------------------------------------------------------------
-  zookeeper:
+  zookeeper-dhl:
     image: confluentinc/cp-zookeeper:latest
-    container_name: ctt-zookeeper
+    container_name: ctt-zookeeper-dhl
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     networks:
-      - ctt
+      - ctt-dhl
     restart: unless-stopped
     deploy:
       resources:
         limits:
           memory: 256M
 
-  kafka:
+  kafka-dhl:
     image: confluentinc/cp-kafka:7.5.0
-    container_name: ctt-kafka
+    container_name: ctt-kafka-dhl
     depends_on:
-      - zookeeper
+      - zookeeper-dhl
     ports:
-      - "9092:9092"
+      - "9093:9092"
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-dhl:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-dhl:29092,PLAINTEXT_HOST://localhost:9093
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_HEAP_OPTS: -Xmx384M -Xms384M
     networks:
-      - ctt
+      - ctt-dhl
     restart: unless-stopped
     deploy:
       resources:
         limits:
           memory: 512M
 
-  audit-logger:
+  audit-logger-dhl:
     build:
       context: ..
       dockerfile: services/l5-macro/Dockerfile
-    container_name: ctt-audit-logger
+    container_name: ctt-audit-logger-dhl
     command: python audit_logger.py
     environment:
-      - CTT_L1_ENGINE_HOST=engine
-      - CTT_FUSION_HOST=fusion
-      - CTT_CITY_ID=city-01
-      - CTT_REGION=uk-southeast
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - CTT_L1_ENGINE_HOST=engine-dhl
+      - CTT_FUSION_HOST=fusion-dhl
+      - CTT_CITY_ID=city-dhl
+      - CTT_REGION=uk-midlands
+      - CTT_DOMAIN_ID=domain-dhl
+      - KAFKA_BOOTSTRAP_SERVERS=kafka-dhl:29092
       - KAFKA_TELEMETRY_TOPIC=ctt.telemetry.raw
       - KAFKA_PERTURBATION_TOPIC=ctt.perturbation.applied
-      - KAFKA_CONSUMER_GROUP=ctt-l5-macro
+      - KAFKA_CONSUMER_GROUP=ctt-l5-macro-dhl
       - PYTHONPATH=/app/services/config:/app/services/l5-macro
     networks:
-      - ctt
+      - ctt-dhl
     depends_on:
-      kafka:
+      kafka-dhl:
         condition: service_started
-      engine:
+      engine-dhl:
         condition: service_healthy
-      fusion:
+      fusion-dhl:
         condition: service_healthy
     restart: unless-stopped
     deploy:
@@ -231,33 +238,37 @@ services:
         limits:
           memory: 128M
 
-  federation-bridge:
+  federation-bridge-dhl:
     build:
       context: ..
       dockerfile: services/l5-macro/Dockerfile
-    container_name: ctt-federation-bridge
+    container_name: ctt-federation-bridge-dhl
     command: python federation_bridge.py
     ports:
-      - "5563:5563"
+      - "5567:5563"
     environment:
-      - CTT_L1_ENGINE_HOST=engine
-      - CTT_FUSION_HOST=fusion
-      - CTT_CITY_ID=city-01
-      - CTT_REGION=uk-southeast
-      - CTT_DOMAIN_ID=domain-dft
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - CTT_L1_ENGINE_HOST=engine-dhl
+      - CTT_FUSION_HOST=fusion-dhl
+      - CTT_CITY_ID=city-dhl
+      - CTT_REGION=uk-midlands
+      - CTT_DOMAIN_ID=domain-dhl
+      # Federation peer: connect back to DfT domain on host
+      - CTT_FEDERATION_PEER=tcp://host.docker.internal:5563
+      - KAFKA_BOOTSTRAP_SERVERS=kafka-dhl:29092
       - KAFKA_TELEMETRY_TOPIC=ctt.telemetry.raw
       - KAFKA_POLICY_TOPIC=ctt.policy.structural
-      - KAFKA_CONSUMER_GROUP=ctt-l5-macro
+      - KAFKA_CONSUMER_GROUP=ctt-l5-macro-dhl
       - PYTHONPATH=/app/services/config:/app/services/l5-macro
     networks:
-      - ctt
+      - ctt-dhl
+      # Shared federation network for direct ZMQ peering if needed
+      - ctt-federation
     depends_on:
-      kafka:
+      kafka-dhl:
         condition: service_started
-      engine:
+      engine-dhl:
         condition: service_healthy
-      fusion:
+      fusion-dhl:
         condition: service_healthy
     restart: unless-stopped
     deploy:
@@ -266,9 +277,12 @@ services:
           memory: 128M
 
 networks:
-  ctt:
+  ctt-dhl:
     driver: bridge
+  ctt-federation:
+    driver: bridge
+    name: ctt-federation
 
 volumes:
-  grafana_storage:
+  grafana_storage_dhl:
     driver: local

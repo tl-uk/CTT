@@ -110,26 +110,26 @@ services:
   # Phase 6 — L2 Orchestrator (separate container for clean maintenance)
   # Shares l2-bridge image; overrides CMD to run orchestrator.py
   # ---------------------------------------------------------------------------
-  orchestrator:
-    build:
-      context: ..
-      dockerfile: services/l2-bridge/Dockerfile
-    container_name: ctt-orchestrator
-    command: python orchestrator.py
-    environment:
-      - CTT_L1_ENGINE_HOST=engine
-      - CTT_FUSION_HOST=fusion
-      - CTT_POLICY_HOST=federation-bridge
-    networks:
-      - ctt
-    depends_on:
-      engine:
-        condition: service_healthy
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 128M
+  # orchestrator:
+  #   build:
+  #     context: ..
+  #     dockerfile: services/l2-bridge/Dockerfile
+  #   container_name: ctt-orchestrator
+  #   command: python orchestrator.py
+  #   environment:
+  #     - CTT_L1_ENGINE_HOST=engine
+  #     - CTT_FUSION_HOST=fusion
+  #     - CTT_POLICY_HOST=federation-bridge
+  #   networks:
+  #     - ctt
+  #   depends_on:
+  #     engine:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 128M
 
   grafana:
     image: grafana/grafana:latest

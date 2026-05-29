@@ -37,14 +37,14 @@ int main() {
         float delta_time = std::chrono::duration<float>(current_time - last_time).count();
         last_time = current_time;
 
+        // 2. Receive perturbations from Python pipeline and apply to the world
+        bridge.receive_perturbations(engine.get_world());
+
         // 1. Tick the Flecs Reflexive Engine
         // Phase 6 NOTE: For true stratified compute, migrate to ecs_progress
         // with pipeline phases (EcsPreUpdate=physics, EcsOnUpdate=BDI,
         // EcsPostUpdate=telemetry) instead of a single update() call.
         engine.update(delta_time);
-
-        // 2. Receive perturbations from Python pipeline and apply to the world
-        bridge.receive_perturbations(engine.get_world());
 
         // 3. Broadcast state to Python dashboard
         bridge.broadcast_state(engine.get_world());

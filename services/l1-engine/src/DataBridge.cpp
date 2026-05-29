@@ -13,10 +13,21 @@ DataBridge::DataBridge(const std::string& pub_address, const std::string& sub_ad
     : context(1)
     , publisher(context, zmq::socket_type::pub)
     , subscriber(context, zmq::socket_type::sub) {
-    
+
+    // --- Hardened socket options for Colima / container network resilience ---
+    publisher.set(zmq::sockopt::sndhwm, 1000);      // Drop rather than block if readers stall
+    publisher.set(zmq::sockopt::linger, 0);         // Immediate close on shutdown
+    publisher.set(zmq::sockopt::reconnect_ivl, 100);
+    publisher.set(zmq::sockopt::reconnect_ivl_max, 5000);
+
+    subscriber.set(zmq::sockopt::rcvhwm, 1000);
+    subscriber.set(zmq::sockopt::linger, 0);
+    subscriber.set(zmq::sockopt::reconnect_ivl, 100);
+    subscriber.set(zmq::sockopt::reconnect_ivl_max, 5000);
+
     publisher.bind(pub_address);
     std::cout << "[L2 Bridge] ZeroMQ Publisher bound to " << pub_address << std::endl;
-    
+
     subscriber.connect(sub_address);
     subscriber.set(zmq::sockopt::subscribe, "");
     std::cout << "[L2 Bridge] ZeroMQ Subscriber connected to " << sub_address << std::endl;
@@ -37,7 +48,7 @@ void DataBridge::broadcast_state(flecs::world& world) {
                const EnergyComponent& energy, 
                const PositionComponent& pos,
                const MindsetComponent& mindset) {
-        
+
         float energy_pct = 0.0f;
         if (energy.maxEnergyStorage > 0.0f) {
             energy_pct = (energy.currentEnergyStorage / energy.maxEnergyStorage) * 100.0f;
@@ -63,7 +74,7 @@ void DataBridge::broadcast_state(flecs::world& world) {
 void DataBridge::receive_perturbations(flecs::world& world) {
     zmq::message_t msg;
     auto result = subscriber.recv(msg, zmq::recv_flags::dontwait);
-    
+
     if (!result || msg.size() == 0) {
         return;
     }

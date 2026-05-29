@@ -29,33 +29,48 @@ void SimulationEngine::update(float delta_time) {
 
 void SimulationEngine::register_systems() {
 
-    // --- SYSTEM 1: SCHMITT TRIGGER (HDS Cognitive Logic) ---
+    // --- SYSTEM 1: MARKET PRESSURE (Strategic L3 Influence) ---
+    // MUST run in PreUpdate so the tax ramp feeds the trigger in the same tick.
+    world.system<MindsetComponent>("MarketPressureSystem")
+        .kind(flecs::PreUpdate)
+        .each([](flecs::iter& it, size_t i, MindsetComponent& m) {
+            const float tax_ramp_rate = 1.2f; 
+            if (!m.is_decarbonized) {
+                m.adversarial_pressure += tax_ramp_rate * it.delta_time();
+            }
+        });
+
+    // --- SYSTEM 2: SCHMITT TRIGGER (HDS Cognitive Logic) ---
+    // Runs in PreUpdate, after MarketPressureSystem, using jittered thresholds.
     world.system<MindsetComponent>("SchmittTriggerSystem")
         .kind(flecs::PreUpdate) 
         .each([](flecs::iter& it, size_t i, MindsetComponent& m) {
             auto entity = it.entity(i);
 
-            double effective_high = m.high_threshold + m.habit_resistance;
-            double effective_low = m.low_threshold - m.satisfaction;
+            // Apply per-agent jitter to prevent thundering-herd
+            double effective_high = (m.high_threshold + m.habit_resistance) * m.threshold_jitter;
+            double effective_low  = (m.low_threshold - m.satisfaction) * m.threshold_jitter;
 
             if (!m.is_decarbonized) {
                 if (m.adversarial_pressure >= effective_high) {
                     m.is_decarbonized = true;
                     std::cout << "[L3] Agent " << entity.name() 
-                              << " switched to GREEN." << std::endl;
+                              << " switched to GREEN (threshold=" << effective_high << ")." << std::endl;
                 }
             } else {
                 if (m.adversarial_pressure <= effective_low) {
                     m.is_decarbonized = false;
                     std::cout << "[L3] Agent " << entity.name() 
-                              << " regressed to LEGACY." << std::endl;
+                              << " regressed to LEGACY (threshold=" << effective_low << ")." << std::endl;
                 }
             }
         });
 
-    // --- SYSTEM 2: ENERGY CONSUMPTION (Reflexive Muscle) ---
+    // --- SYSTEM 3: ENERGY CONSUMPTION (Reflexive Muscle) ---
+    // Physics — runs in OnUpdate, after all PreUpdate decisions.
     world.system<KinematicComponent, EnergyComponent, const PayloadComponent>("EnergyConsumptionSystem")
         .with<MicroActive>()
+        .kind(flecs::OnUpdate)
         .each([](flecs::iter& it, size_t i, 
                  KinematicComponent& kin, 
                  EnergyComponent& energy, 
@@ -73,21 +88,13 @@ void SimulationEngine::register_systems() {
             if (energy.currentEnergyStorage < 0) energy.currentEnergyStorage = 0;
         });
 
-    // --- SYSTEM 3: MARKET PRESSURE (Strategic L3 Influence) ---
-    world.system<MindsetComponent>("MarketPressureSystem")
-        .each([](flecs::iter& it, size_t i, MindsetComponent& m) {
-            const float tax_ramp_rate = 1.2f; 
-            if (!m.is_decarbonized) {
-                m.adversarial_pressure += tax_ramp_rate * it.delta_time();
-            }
-        });
-
     // --- SYSTEM 4: KINEMATICS UPDATE (Simple motion model) ---
+    // Physics — runs in OnUpdate.
     world.system<PositionComponent, const KinematicComponent>("KinematicsUpdateSystem")
+        .kind(flecs::OnUpdate)
         .each([](flecs::iter& it, size_t i, 
                  PositionComponent& pos, 
                  const KinematicComponent& kin) {
-            // Simple lat/lon update (very crude, for demo only)
             float dt = it.delta_time();
             pos.latitude  += (kin.speed_mps * std::sin(kin.heading * 3.14159f / 180.0f) * dt) / 111320.0f;
             pos.longitude += (kin.speed_mps * std::cos(kin.heading * 3.14159f / 180.0f) * dt) / (111320.0f * std::cos(pos.latitude * 3.14159f / 180.0f));
@@ -165,6 +172,8 @@ void SimulationEngine::initialize_test_fleet() {
     std::uniform_real_distribution<float> heading_dist(0.0f, 360.0f);
     std::uniform_real_distribution<float> load_dist(0.3f, 0.95f);
     std::uniform_int_distribution<int> pax_dist(0, 2);
+    // NEW: ±5% jitter to break thundering-herd synchronisation
+    std::uniform_real_distribution<float> jitter_dist(0.95f, 1.05f);
 
     for (size_t i = 0; i < FLEET_SIZE; ++i) {
         const auto& t = FLEET_TEMPLATES[i];
@@ -213,12 +222,13 @@ void SimulationEngine::initialize_test_fleet() {
             t.satisfaction,// satisfaction
             t.high_thr,    // high_threshold
             t.low_thr,     // low_threshold
+            jitter_dist(gen), // threshold_jitter — unique per agent
             false          // is_decarbonized
         });
     }
 
     std::cout << "[L3 Core] Fleet initialized: " << FLEET_SIZE 
-              << " agents with HDS Mindset models." << std::endl;
+              << " agents with HDS Mindset models (±5% jitter)." << std::endl;
 }
 
 void CTT::SimulationEngine::register_reflection() {
@@ -228,6 +238,7 @@ void CTT::SimulationEngine::register_reflection() {
         .member<double>("satisfaction")
         .member<double>("high_threshold")
         .member<double>("low_threshold")
+        .member<double>("threshold_jitter")  // NEW
         .member<bool>("is_decarbonized");
 
     world.component<EnergyComponent>()

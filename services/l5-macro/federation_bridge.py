@@ -39,7 +39,7 @@ class FederationBridge:
         print(f"[FederationBridge] ZMQ telemetry sub: {ZMQ_TELEMETRY_SUB}")
         print("[FederationBridge] L5 → L2 feedback loop active")
         time.sleep(1.5)
-        
+
         self._running = True
         last_eval = time.time()
 
@@ -49,7 +49,8 @@ class FederationBridge:
                 data = json.loads(msg)
                 if isinstance(data, list):
                     for agent in data:
-                        city = agent.get("city_id", "unknown")
+                        # FIX: default missing city_id to local CITY_ID instead of "unknown"
+                        city = agent.get("city_id", CITY_ID)
                         pressure = agent.get("adversarial_pressure", 0)
                         self.window[city].append(pressure)
             except zmq.error.Again:

@@ -111,8 +111,11 @@ namespace CTT {
         // 3. Hysteresis Thresholds (The Schmitt Trigger points)
         double high_threshold;    ///< Switch to EV
         double low_threshold;     ///< Revert to ICE
-        
-        // 4. The Discrete State (The Output)
+
+        // 4. Jitter — prevents thundering-herd synchronisation
+        double threshold_jitter;  ///< Uniform [0.95, 1.05] multiplier
+
+        // 5. The Discrete State (The Output)
         bool is_decarbonized;     ///< True if currently in a low-carbon state (e.g., BEV or FCEV)
     };
 

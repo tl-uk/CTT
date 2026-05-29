@@ -14,10 +14,18 @@
 # Detect CPU cores for parallel builds
 NPROCS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
+# =============================================================================
 # Service directories
-L1_DIR     := services/l1-engine
-L2_DIR     := services/l2-bridge
-L3_DIR     := services/l3-analytics
+# NOTE: Directory names predate the formal 5-layer architecture.
+#       L1_DIR  = physical path services/l1-engine  → conceptually Layer 3 (Cognitive Core)
+#       L2_DIR  = physical path services/l2-bridge  → conceptually Layer 2 (Orchestration)
+#       L3_DIR  = physical path services/l3-analytics → conceptually Layer 5 (Macro Analytics)
+# =============================================================================
+L1_DIR     := services/l1-engine      # C++ Flecs engine (L3 Cognitive-Reflexive Core)
+L2_DIR     := services/l2-bridge      # Python dashboard + orchestrator (L2 Control)
+L3_DIR     := services/l3-analytics   # Python BPTK / data science (L5 Macro)
+L4_DIR     := services/l4-spatial     # Reserved: SUMO / OSM integration (L4 Spatial)
+L5_DIR     := services/l5-macro       # Python audit + federation (L5 Macro / National)
 BUILD_DIR  := $(L1_DIR)/build
 CONFIG_DIR := services/config
 
@@ -204,6 +212,23 @@ run-dashboard-bg: ## Run the L2 Bridge dashboard in background (logs to /tmp)
 	@echo "📊 Dashboard backgrounded (log: /tmp/ctt_dashboard.log)"
 	@$(call wait-for-port,5001,dashboard)
 
+# L2 Orchestrator (separate container or native)
+# ---------------------------------------------------------------------------
+run-orchestrator-bg: ## Run L2 Orchestrator in background (native)
+	@echo "🧠 Starting L2 Orchestrator..."
+	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR)" nohup python orchestrator.py > /tmp/ctt_orchestrator.log 2>&1 &
+	@echo "🧠 Orchestrator backgrounded (log: /tmp/ctt_orchestrator.log)"
+
+# ---------------------------------------------------------------------------
+# Full Docker Compose — Orchestrator variant
+# ---------------------------------------------------------------------------
+compose-up-orchestrator: ## Start CTT stack with separate orchestrator container
+	@echo "🚀 Starting CTT stack (orchestrator variant)..."
+	@docker-compose -f deploy/docker-compose.yml up --build -d
+
+compose-ps-orchestrator: ## Show running services including orchestrator
+	@docker-compose -f deploy/docker-compose.yml ps
+
 # =============================================================================
 # L3 Analytics — Python Data Science & ML
 # =============================================================================
@@ -212,6 +237,22 @@ setup-l3: ## Setup L3 Analytics environment
 	@echo "🐍 Setting up L3 Analytics..."
 	@cd $(L3_DIR) && $(PYTHON_VENV_CMD)
 	@cd $(L3_DIR) && $(PYTHON_PIP_CMD) -r requirements.txt
+
+# =============================================================================
+# L5 Macro — Native Python (for debugging outside Docker)
+# =============================================================================
+setup-l5: ## Setup L5 Macro Python environment
+	@echo "🐍 Setting up L5 Macro environment..."
+	@cd services/l5-macro && $(PYTHON_VENV_CMD)
+	@cd services/l5-macro && $(PYTHON_PIP_CMD) -r requirements.txt
+
+run-audit-logger: ## Run audit logger natively (requires Kafka/Redpanda running)
+	@echo "📝 Starting Audit Logger..."
+	@cd services/l5-macro && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR):." python audit_logger.py
+
+run-federation-bridge: ## Run federation bridge natively
+	@echo "🏛️ Starting Federation Bridge..."
+	@cd services/l5-macro && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR):." python federation_bridge.py
 
 # =============================================================================
 # Data Pipeline — Inbound Refinery
@@ -399,6 +440,22 @@ compose-logs: ## Tail fusion logs
 
 compose-ps: ## Show running services
 	@docker-compose -f $(COMPOSE_FILE) ps
+
+# ---------------------------------------------------------------------------
+# Docker Compose — Redpanda variant (disk rescue)
+# ---------------------------------------------------------------------------
+COMPOSE_REDPANDA := deploy/docker-compose-redpanda.yml
+
+compose-up-redpanda: ## Start CTT stack with Redpanda instead of Kafka+Zookeeper
+	@echo "🚀 Starting CTT stack (Redpanda variant)..."
+	@docker-compose -f $(COMPOSE_REDPANDA) up --build -d
+
+compose-down-redpanda: ## Stop Redpanda variant stack
+	@echo "🛑 Stopping CTT stack (Redpanda variant)..."
+	@docker-compose -f $(COMPOSE_REDPANDA) down
+
+compose-logs-redpanda: ## Tail Redpanda variant logs
+	@docker-compose -f $(COMPOSE_REDPANDA) logs -f
 
 # =============================================================================
 # Global Utilities

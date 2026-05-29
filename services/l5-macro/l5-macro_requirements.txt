@@ -1,0 +1,14 @@
+# ---------------------------------
+# l5-macro/requirements.txt
+# ---------------------------------
+# Kafka client (librdkafka bindings) — works with Apache Kafka AND Redpanda
+confluent-kafka>=2.3.0
+
+# ZMQ for hot-path telemetry / policy sockets
+pyzmq==27.1.0
+
+# Environment loading (shared with services/config/settings.py)
+python-dotenv>=1.0.0
+
+# JSON performance (optional but keeps parity with l2-bridge)
+ujson==5.10.0

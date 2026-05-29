@@ -16,6 +16,9 @@ brew "grpc"
 brew "python@3.13"
 brew "uv"
 
+# Kafka / Redpanda client libraries (for native Python development)
+brew "librdkafka"
+
 # Docker / Container runtime (Colima instead of Docker Desktop)
 brew "colima"
 brew "docker"

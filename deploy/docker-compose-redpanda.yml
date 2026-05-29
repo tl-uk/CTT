@@ -1,7 +1,7 @@
 # =============================================================================
 # CTT Phase 6 — Production Stack Orchestration + L5 Macro Federation
-# Location: deploy/docker-compose.yml
-# Usage: docker-compose -f deploy/docker-compose.yml up --build
+# Redpanda variant: replaces JVM Kafka + Zookeeper with Redpanda (~200 MB, no JVM)
+# Usage: docker-compose -f deploy/docker-compose-redpanda.yml up --build
 # =============================================================================
 
 services:
@@ -106,31 +106,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Phase 6 — L2 Orchestrator (separate container for clean maintenance)
-  # Shares l2-bridge image; overrides CMD to run orchestrator.py
-  # ---------------------------------------------------------------------------
-  orchestrator:
-    build:
-      context: ..
-      dockerfile: services/l2-bridge/Dockerfile
-    container_name: ctt-orchestrator
-    command: python orchestrator.py
-    environment:
-      - CTT_L1_ENGINE_HOST=engine
-      - CTT_FUSION_HOST=fusion
-      - CTT_POLICY_HOST=federation-bridge
-    networks:
-      - ctt
-    depends_on:
-      engine:
-        condition: service_healthy
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-
   grafana:
     image: grafana/grafana:latest
     container_name: ctt-grafana
@@ -153,45 +128,38 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Phase 6 — Kafka Core (Zookeeper mode — stable on Colima)
+  # Phase 6 — Redpanda Core (Kafka API-compatible, no JVM, no Zookeeper)
   # ---------------------------------------------------------------------------
-  zookeeper:
-    image: confluentinc/cp-zookeeper:latest
-    container_name: ctt-zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    networks:
-      - ctt
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    container_name: ctt-kafka
-    depends_on:
-      - zookeeper
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    container_name: ctt-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --overprovisioned
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
     ports:
       - "9092:9092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_HEAP_OPTS: -Xmx384M -Xms384M
+      - "29092:29092"
     networks:
       - ctt
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 768M
 
   audit-logger:
     build:
@@ -204,7 +172,7 @@ services:
       - CTT_FUSION_HOST=fusion
       - CTT_CITY_ID=city-01
       - CTT_REGION=uk-southeast
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:29092
       - KAFKA_TELEMETRY_TOPIC=ctt.telemetry.raw
       - KAFKA_PERTURBATION_TOPIC=ctt.perturbation.applied
       - KAFKA_CONSUMER_GROUP=ctt-l5-macro
@@ -212,7 +180,7 @@ services:
     networks:
       - ctt
     depends_on:
-      kafka:
+      redpanda:
         condition: service_started
       engine:
         condition: service_healthy
@@ -237,7 +205,7 @@ services:
       - CTT_FUSION_HOST=fusion
       - CTT_CITY_ID=city-01
       - CTT_REGION=uk-southeast
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:29092
       - KAFKA_TELEMETRY_TOPIC=ctt.telemetry.raw
       - KAFKA_POLICY_TOPIC=ctt.policy.structural
       - KAFKA_CONSUMER_GROUP=ctt-l5-macro
@@ -245,7 +213,7 @@ services:
     networks:
       - ctt
     depends_on:
-      kafka:
+      redpanda:
         condition: service_started
       engine:
         condition: service_healthy

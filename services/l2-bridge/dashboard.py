@@ -384,12 +384,12 @@ app = Flask(__name__)
 collector = TelemetryCollector()
 scenarios = ScenarioEngine(collector)
 policy_sub = PolicySubscriber()
-orch = Layer2Orchestrator()
+# orch = Layer2Orchestrator()
 
 # EAGER START: Start collector, policy listener, and orchestrator immediately
 collector.start()
 policy_sub.start()
-orch.start()
+# orch.start()
 print("[Dashboard] Telemetry collector + Policy subscriber + Orchestrator started eagerly")
 
 

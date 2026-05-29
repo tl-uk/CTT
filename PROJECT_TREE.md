@@ -1,16 +1,18 @@
 # CTT Project Structure
 
-**Generated:** Mon May 25 21:34:04 BST 2026
+**Generated:** Fri May 29 14:09:08 BST 2026
 
 ```
 └── CTT
     ├── .env
+    ├── ARCHITECTURE.md
     ├── Makefile
     ├── PROJECT_TREE.md
     ├── api
     │   └── proto
     │       └── ctt_messages.proto
     ├── deploy
+    │   ├── docker-compose-redpanda.yml
     │   ├── docker-compose.yml
     │   └── grafana
     │       ├── dashboards
@@ -63,7 +65,15 @@
         ├── l2-bridge
         │   ├── Dockerfile
         │   ├── dashboard.py
+        │   ├── orchestrator.py
         │   └── requirements.txt
-        └── l3-analytics
-            └── requirements.txt
+        ├── l3-analytics
+        │   └── requirements.txt
+        ├── l4-spatial
+        │   └── README.md
+        └── l5-macro
+            ├── Dockerfile
+            ├── __init__.py
+            ├── audit_logger.py
+            └── federation_bridge.py
 ```

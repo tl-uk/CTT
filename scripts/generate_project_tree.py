@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
 Generate a Markdown project tree for CTT documentation/handoff.
+
+run: python scripts/generate_project_tree.py
 """
 import os
 from pathlib import Path

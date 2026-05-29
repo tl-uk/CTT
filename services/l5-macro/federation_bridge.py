@@ -24,11 +24,12 @@ ZMQ_TELEMETRY_SUB = ZMQ_PORTS.get("L1_TELEMETRY_SUB", "tcp://localhost:5555")
 class FederationBridge:
     def __init__(self):
         self.ctx = zmq.Context()
-        self.policy_pub = get_resilient_socket(self.ctx, zmq.PUB)
+        self.policy_pub = self.ctx.socket(zmq.PUB)
         self.policy_pub.bind(ZMQ_POLICY_PUB)
-        self.tele_sub = get_resilient_socket(self.ctx, zmq.SUB, is_sub=True)
+        self.tele_sub = self.ctx.socket(zmq.SUB)
         self.tele_sub.connect(ZMQ_TELEMETRY_SUB)
         self.tele_sub.setsockopt_string(zmq.SUBSCRIBE, "")
+        self.tele_sub.set(zmq.RCVTIMEO, 2000)
         self._running = False
         self.window = defaultdict(list)
 
@@ -37,7 +38,7 @@ class FederationBridge:
         print(f"[FederationBridge] ZMQ policy pub: {ZMQ_POLICY_PUB}")
         print(f"[FederationBridge] ZMQ telemetry sub: {ZMQ_TELEMETRY_SUB}")
         print("[FederationBridge] L5 → L2 feedback loop active")
-        time.sleep(1.0)
+        time.sleep(1.5)
         
         self._running = True
         last_eval = time.time()

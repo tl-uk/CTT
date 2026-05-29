@@ -1,0 +1,6 @@
+# services/l2-orchestrator/requirements.txt
+pyzmq==27.1.0
+requests==2.32.4
+python-dotenv>=1.0.0
+confluent-kafka>=2.3.0
+ujson==5.10.0

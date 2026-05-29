@@ -1,0 +1,46 @@
+{
+  "@context": [
+    "https://www.w3.org/2018/credentials/v1",
+    "https://w3id.org/gaia-x/development"
+  ],
+  "type": ["VerifiablePresentation", "GaiaXSelfDescription"],
+  "verifiableCredential": [
+    {
+      "@context": ["https://www.w3.org/2018/credentials/v1"],
+      "type": ["VerifiableCredential", "GaiaXLegalPerson"],
+      "id": "did:web:transit-hub.uk-southeast.ctt.gov.uk",
+      "issuer": "did:web:transit-hub.uk-southeast.ctt.gov.uk",
+      "issuanceDate": "2026-05-29T00:00:00Z",
+      "credentialSubject": {
+        "id": "did:web:transit-hub.uk-southeast.ctt.gov.uk",
+        "gx:type": "gx:LegalPerson",
+        "gx:name": "UK TransiT Hub — South East Node",
+        "gx:description": "CTT edge node for freight decarbonisation in the UK South East region.",
+        "gx:countryCode": "GB",
+        "gx:location": {
+          "gx:latitude": 51.5074,
+          "gx:longitude": -0.1278
+        },
+        "gx:serviceOffering": [
+          {
+            "gx:id": "urn:ctt:service:telemetry",
+            "gx:name": "CTT Telemetry Feed",
+            "gx:description": "Real-time agent telemetry for carbon intensity modelling.",
+            "gx:dataAccountExport": {
+              "gx:requestType": "API",
+              "gx:accessType": "digital",
+              "gx:formatType": "application/json"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "proof": {
+    "type": "Ed25519Signature2020",
+    "created": "2026-05-29T00:00:00Z",
+    "proofPurpose": "assertionMethod",
+    "verificationMethod": "did:web:transit-hub.uk-southeast.ctt.gov.uk#key-1",
+    "proofValue": "z58DAdF..." 
+  }
+}

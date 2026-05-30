@@ -1,0 +1,89 @@
+# services/config/domains.yaml
+# CTT Multi-Stakeholder Federation Registry
+# Each domain is an independent CTT instance with its own data sovereignty.
+# Domains federate via ZMQ without changing internal schemas or infrastructure.
+#
+# Usage:
+#   python scripts/generate_domain_compose.py --domain domain-dhl
+#   docker-compose -f deploy/docker-compose.domain-dhl.yml up -d
+
+domains:
+  domain-dft:
+    description: "Department for Transport — national oversight and audit"
+    city_id: city-01
+    region: uk-southeast
+    port_offset: 0
+    network: ctt
+    # Base domain — no federation peers defined (it is the root observer)
+
+  domain-dhl:
+    description: "DHL Express — logistics and last-mile freight"
+    city_id: city-dhl
+    region: uk-midlands
+    port_offset: 2
+    network: ctt-dhl
+    federation_peers:
+      - target: domain-dft
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5563
+        topic: ctt.policy.structural
+        notes: "Subscribe to DfT structural policies (toll discounts, congestion charges)"
+
+  domain-network-rail:
+    description: "Network Rail — intermodal rail freight and passenger"
+    city_id: city-rail
+    region: uk-north
+    port_offset: 4
+    network: ctt-rail
+    federation_peers:
+      - target: domain-dft
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5563
+        topic: ctt.policy.structural
+      - target: domain-dhl
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5567
+        topic: ctt.telemetry.raw
+        notes: "Monitor DHL freight handoffs at rail terminals"
+
+  domain-tesco:
+    description: "Tesco Supply Chain — grocery distribution fleet"
+    city_id: city-tesco
+    region: uk-southeast
+    port_offset: 6
+    network: ctt-tesco
+    federation_peers:
+      - target: domain-dft
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5563
+        topic: ctt.policy.structural
+      - target: domain-dhl
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5567
+        topic: ctt.policy.structural
+        notes: "Align with DHL on shared urban depot policies"
+
+  domain-nhs:
+    description: "NHS Logistics — medical supply chain and emergency vehicles"
+    city_id: city-nhs
+    region: uk-london
+    port_offset: 8
+    network: ctt-nhs
+    federation_peers:
+      - target: domain-dft
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5563
+        topic: ctt.policy.structural
+        notes: "Emergency vehicle priority routing from DfT"
+
+# Base ports (domain-dft uses these directly)
+# port_offset shifts ALL ports by this amount:
+#   engine_telemetry: 5555 + offset
+#   fusion_pub:       5556 + offset
+#   harvester_pub:    5560 + offset (internal only)
+#   interpreter_pub:  5561 + offset (internal only)
+#   policy_pub:       5563 + offset
+#   tactical_pub:     5564 + offset
+#   kafka_broker:     9092 + offset
+#   dashboard_rest:   5001 + offset
+#   grafana:          3000 + offset

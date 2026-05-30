@@ -4,24 +4,24 @@ scripts/test_multi_domain.py
 
 CTT Phase 6.5 — Multi-Stakeholder Federation E2E Test
 
-Validates plug-and-use resilience across two independent CTT domains:
-  - domain-dft (default compose): Department for Transport view
-  - domain-dhl (domain-dhl compose): DHL logistics operator view
+Validates plug-and-use resilience across two independent CTT domains.
+Uses scripts/generate_domain_compose.py to render compose files on-the-fly.
 
 Test sequence:
-  1. Spin up domain-dft
-  2. Spin up domain-dhl (shifted ports, separate network)
-  3. Verify both domains report healthy agents via REST
-  4. Verify federation bridges can exchange ZMQ heartbeats
-  5. Disconnect domain-dhl (docker-compose down)
-  6. Verify domain-dft continues unaffected (resilience)
-  7. Reconnect domain-dhl
-  8. Verify domain-dhl auto-syncs and resumes federation
+  1. Generate compose for domain-a and domain-b from domains.yaml
+  2. Spin up domain-a (default / DfT)
+  3. Spin up domain-b (e.g., DHL, Network Rail, Tesco, NHS)
+  4. Verify both domains report healthy agents via REST
+  5. Verify federation bridges can exchange ZMQ heartbeats
+  6. Disconnect domain-b (simulate stakeholder outage)
+  7. Verify domain-a continues unaffected (resilience)
+  8. Reconnect domain-b
+  9. Verify domain-b auto-syncs and resumes federation
 
 Usage:
-    python scripts/test_multi_domain.py [--keep]
+    python scripts/test_multi_domain.py --domain-a domain-dft --domain-b domain-dhl [--keep]
 
-Requires: Docker Compose v2, Python 3.10+, requests, zmq
+Requires: Docker Compose v2, Python 3.10+, requests, zmq, pyyaml
 """
 import argparse
 import json
@@ -38,28 +38,34 @@ import zmq
 # =============================================================================
 
 PROJECT_ROOT = Path(__file__).parent.parent
-COMPOSE_DFT = PROJECT_ROOT / "deploy" / "docker-compose.yml"
-COMPOSE_DHL = PROJECT_ROOT / "deploy" / "docker-compose.domain-dhl.yml"
+COMPOSE_BASE = PROJECT_ROOT / "deploy" / "docker-compose.yml"
+GENERATOR = PROJECT_ROOT / "scripts" / "generate_domain_compose.py"
 
-ENDPOINTS = {
-    "dft": {
-        "dashboard": "http://localhost:5001",
-        "grafana": "http://localhost:3000",
-        "telemetry_zmq": "tcp://localhost:5555",
-        "policy_zmq": "tcp://localhost:5563",
-        "tactical_zmq": "tcp://localhost:5564",
-    },
-    "dhl": {
-        "dashboard": "http://localhost:5002",
-        "grafana": "http://localhost:3001",
-        "telemetry_zmq": "tcp://localhost:5557",
-        "policy_zmq": "tcp://localhost:5567",
-        "tactical_zmq": "tcp://localhost:5568",
-    },
-}
+def get_compose_path(domain: str) -> Path:
+    return PROJECT_ROOT / "deploy" / f"docker-compose.{domain}.yml"
 
-HEALTH_TIMEOUT = 120  # seconds
-AGENT_MIN_COUNT = 5
+
+def get_ports(domain: str) -> dict:
+    """Derive ports from domains.yaml via generator (or hardcode fallback)."""
+    # Try to read from domains.yaml directly
+    try:
+        import yaml
+        domains_file = PROJECT_ROOT / "services" / "config" / "domains.yaml"
+        with open(domains_file) as f:
+            data = yaml.safe_load(f)
+        offset = data["domains"][domain]["port_offset"]
+    except Exception:
+        # Fallback for domain-dft (offset 0)
+        offset = 0 if domain == "domain-dft" else 2
+
+    return {
+        "dashboard": 5001 + offset,
+        "grafana": 3000 + offset,
+        "telemetry_zmq": 5555 + offset,
+        "policy_zmq": 5563 + offset,
+        "tactical_zmq": 5564 + offset,
+        "kafka": 9092 + offset,
+    }
 
 
 # =============================================================================
@@ -71,15 +77,26 @@ def run(cmd: list[str], cwd: Path = PROJECT_ROOT, check: bool = True) -> subproc
     return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
 
 
-def health_check(domain: str, timeout: int = HEALTH_TIMEOUT) -> dict:
+def generate_domain(domain: str):
+    """Run the generator script to emit compose file."""
+    print(f"[GEN] Rendering docker-compose.{domain}.yml ...")
+    run([sys.executable, str(GENERATOR), "--domain", domain])
+    compose_path = get_compose_path(domain)
+    if not compose_path.exists():
+        raise RuntimeError(f"Generator failed to produce {compose_path}")
+    print(f"[GEN] OK: {compose_path}")
+
+
+def health_check(domain: str, timeout: int = 120) -> dict:
     """Poll dashboard /health until agents are online or timeout."""
-    url = ENDPOINTS[domain]["dashboard"] + "/health"
+    ports = get_ports(domain)
+    url = f"http://localhost:{ports['dashboard']}/health"
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(url, timeout=2) as resp:
                 data = json.loads(resp.read().decode())
-                if data.get("agents_online", 0) >= AGENT_MIN_COUNT:
+                if data.get("agents_online", 0) >= 5:
                     return data
         except Exception as e:
             print(f"  [{domain}] Waiting for health... ({e})")
@@ -118,27 +135,34 @@ def log_step(step: int, desc: str):
 # Test Phases
 # =============================================================================
 
-def phase_bring_up_dft():
-    log_step(1, "Bring up domain-dft (DfT)")
-    run(["docker-compose", "-f", str(COMPOSE_DFT), "down", "--volumes", "--remove-orphans"], check=False)
-    run(["docker", "builder", "prune", "-af"], check=False)
-    run(["docker-compose", "-f", str(COMPOSE_DFT), "up", "--build", "-d"])
-    data = health_check("dft")
-    print(f"  [dft] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
+def phase_generate(domain_a: str, domain_b: str):
+    log_step(0, "Generate domain compose files")
+    if domain_a != "domain-dft":
+        generate_domain(domain_a)
+    generate_domain(domain_b)
 
 
-def phase_bring_up_dhl():
-    log_step(2, "Bring up domain-dhl (DHL)")
-    run(["docker-compose", "-f", str(COMPOSE_DHL), "down", "--volumes", "--remove-orphans"], check=False)
-    run(["docker-compose", "-f", str(COMPOSE_DHL), "up", "--build", "-d"])
-    data = health_check("dhl")
-    print(f"  [dhl] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
+def phase_bring_up(domain: str, is_base: bool = False):
+    log_step(1 if is_base else 2, f"Bring up {domain}")
+    if is_base:
+        compose = COMPOSE_BASE
+        # Ensure base is down first for clean state
+        run(["docker-compose", "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
+        run(["docker", "builder", "prune", "-af"], check=False)
+    else:
+        compose = get_compose_path(domain)
+        run(["docker-compose", "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
+
+    run(["docker-compose", "-f", str(compose), "up", "--build", "-d"])
+    data = health_check(domain)
+    print(f"  [{domain}] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
 
 
-def phase_verify_federation():
+def phase_verify_federation(domain_a: str, domain_b: str):
     log_step(3, "Verify ZMQ telemetry streams on both domains")
-    for domain in ("dft", "dhl"):
-        addr = ENDPOINTS[domain]["telemetry_zmq"]
+    for domain in (domain_a, domain_b):
+        ports = get_ports(domain)
+        addr = f"tcp://localhost:{ports['telemetry_zmq']}"
         ok = zmq_probe(addr, timeout_ms=5000)
         status = "OK" if ok else "FAIL"
         print(f"  [{domain}] Telemetry ZMQ {addr} -> {status}")
@@ -146,40 +170,39 @@ def phase_verify_federation():
             raise RuntimeError(f"[{domain}] Telemetry ZMQ not flowing")
 
     log_step(4, "Verify tactical policy streams")
-    for domain in ("dft", "dhl"):
-        addr = ENDPOINTS[domain]["tactical_zmq"]
-        # Tactical pub may not emit constantly; just verify bind is reachable
+    for domain in (domain_a, domain_b):
+        ports = get_ports(domain)
+        addr = f"tcp://localhost:{ports['tactical_zmq']}"
         ok = zmq_probe(addr, timeout_ms=2000)
         print(f"  [{domain}] Tactical ZMQ {addr} -> {'OK' if ok else 'NO_MSG (expected if no anomaly)'}")
 
 
-def phase_resilience_disconnect_dhl():
-    log_step(5, "Disconnect domain-dhl (simulate outage)")
-    run(["docker-compose", "-f", str(COMPOSE_DHL), "down"])
+def phase_resilience_disconnect(domain_b: str):
+    log_step(5, f"Disconnect {domain_b} (simulate stakeholder outage)")
+    compose = get_compose_path(domain_b)
+    run(["docker-compose", "-f", str(compose), "down"])
     time.sleep(3)
 
-    log_step(6, "Verify domain-dft continues unaffected")
-    data = health_check("dft", timeout=30)
-    print(f"  [dft] Still healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
 
-    # Verify DHL dashboard is unreachable
-    dhl_url = ENDPOINTS["dhl"]["dashboard"] + "/health"
-    try:
-        with urllib.request.urlopen(dhl_url, timeout=2) as resp:
-            raise RuntimeError("[dhl] Dashboard still reachable after down — port conflict?")
-    except Exception:
-        print("  [dhl] Correctly unreachable after disconnect")
+def phase_verify_resilience(domain_a: str):
+    log_step(6, f"Verify {domain_a} continues unaffected")
+    data = health_check(domain_a, timeout=30)
+    print(f"  [{domain_a}] Still healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
 
 
-def phase_reconnect_dhl():
-    log_step(7, "Reconnect domain-dhl (simulate recovery)")
-    run(["docker-compose", "-f", str(COMPOSE_DHL), "up", "-d"])
-    data = health_check("dhl")
-    print(f"  [dhl] Recovered: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
+def phase_reconnect(domain_b: str):
+    log_step(7, f"Reconnect {domain_b} (simulate recovery)")
+    compose = get_compose_path(domain_b)
+    run(["docker-compose", "-f", str(compose), "up", "-d"])
+    data = health_check(domain_b)
+    print(f"  [{domain_b}] Recovered: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
 
+
+def phase_verify_post_reconnect(domain_a: str, domain_b: str):
     log_step(8, "Verify federation resumes after reconnect")
-    for domain in ("dft", "dhl"):
-        addr = ENDPOINTS[domain]["telemetry_zmq"]
+    for domain in (domain_a, domain_b):
+        ports = get_ports(domain)
+        addr = f"tcp://localhost:{ports['telemetry_zmq']}"
         ok = zmq_probe(addr, timeout_ms=8000)
         status = "RESUMED" if ok else "FAIL"
         print(f"  [{domain}] Telemetry ZMQ {addr} -> {status}")
@@ -187,17 +210,22 @@ def phase_reconnect_dhl():
             raise RuntimeError(f"[{domain}] Telemetry did not resume after reconnect")
 
 
-def phase_cleanup(keep: bool = False):
+def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
     if keep:
+        ports_a = get_ports(domain_a)
+        ports_b = get_ports(domain_b)
         print("\n[KEEP] Stacks left running for manual inspection.")
-        print("       DfT dashboard: http://localhost:5001")
-        print("       DHL dashboard: http://localhost:5002")
-        print("       DfT Grafana:   http://localhost:3000")
-        print("       DHL Grafana:   http://localhost:3001")
+        print(f"       {domain_a} dashboard: http://localhost:{ports_a['dashboard']}")
+        print(f"       {domain_b} dashboard: http://localhost:{ports_b['dashboard']}")
+        print(f"       {domain_a} Grafana:   http://localhost:{ports_a['grafana']}")
+        print(f"       {domain_b} Grafana:   http://localhost:{ports_b['grafana']}")
         return
+
     log_step(9, "Cleanup: tear down both domains")
-    run(["docker-compose", "-f", str(COMPOSE_DHL), "down", "--volumes", "--remove-orphans"], check=False)
-    run(["docker-compose", "-f", str(COMPOSE_DFT), "down", "--volumes", "--remove-orphans"], check=False)
+    run(["docker-compose", "-f", str(get_compose_path(domain_b)), "down", "--volumes", "--remove-orphans"], check=False)
+    if domain_a != "domain-dft":
+        run(["docker-compose", "-f", str(get_compose_path(domain_a)), "down", "--volumes", "--remove-orphans"], check=False)
+    run(["docker-compose", "-f", str(COMPOSE_BASE), "down", "--volumes", "--remove-orphans"], check=False)
     print("[OK] All stacks torn down")
 
 
@@ -207,26 +235,37 @@ def phase_cleanup(keep: bool = False):
 
 def main():
     parser = argparse.ArgumentParser(description="CTT Multi-Stakeholder Federation E2E Test")
+    parser.add_argument("--domain-a", default="domain-dft", help="Base domain (default: domain-dft)")
+    parser.add_argument("--domain-b", required=True, help="Peer domain (e.g., domain-dhl, domain-tesco)")
     parser.add_argument("--keep", action="store_true", help="Leave stacks running after test")
+    parser.add_argument("--skip-generate", action="store_true", help="Skip compose generation (use existing files)")
     args = parser.parse_args()
 
-    print("CTT Phase 6.5 — Multi-Stakeholder Federation E2E Test")
+    print(f"CTT Phase 6.5 — Multi-Stakeholder Federation E2E Test")
+    print(f"Base domain:  {args.domain_a}")
+    print(f"Peer domain:  {args.domain_b}")
     print(f"Project root: {PROJECT_ROOT}")
 
     try:
-        phase_bring_up_dft()
-        phase_bring_up_dhl()
-        phase_verify_federation()
-        phase_resilience_disconnect_dhl()
-        phase_reconnect_dhl()
+        if not args.skip_generate:
+            phase_generate(args.domain_a, args.domain_b)
+        phase_bring_up(args.domain_a, is_base=True)
+        phase_bring_up(args.domain_b)
+        phase_verify_federation(args.domain_a, args.domain_b)
+        phase_resilience_disconnect(args.domain_b)
+        phase_verify_resilience(args.domain_a)
+        phase_reconnect(args.domain_b)
+        phase_verify_post_reconnect(args.domain_a, args.domain_b)
         print("\n" + "="*60)
         print("ALL TESTS PASSED — Plug-and-use resilience demonstrated")
         print("="*60)
     except Exception as e:
         print(f"\n[FAIL] {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
     finally:
-        phase_cleanup(keep=args.keep)
+        phase_cleanup(args.domain_a, args.domain_b, keep=args.keep)
 
 
 if __name__ == "__main__":

@@ -30,12 +30,14 @@ class Layer2Orchestrator:
     ANOMALY_PRESSURE = 80.0
     ANOMALY_COUNT = 3
     WINDOW_SIZE = 60
+    COOLDOWN_SECONDS = 30.0  # Suppress repeat alerts for same sector
 
     def __init__(self):
         self._running = False
         self._thread = None
         self.agent_history = {}
         self.sector_state = {}
+        self.last_emission = {}  # sector -> timestamp
 
     def start(self):
         if self._running:
@@ -94,7 +96,8 @@ class Layer2Orchestrator:
                 self.agent_history[name] = deque(maxlen=self.WINDOW_SIZE)
             self.agent_history[name].append((now, pressure, sector))
 
-    def detect_swarm_anomaly(self) -> bool:
+    def detect_swarm_anomaly(self):
+        """Returns sector name if anomaly detected, else None."""
         sector_counts = defaultdict(int)
         for name, window in self.agent_history.items():
             if not window:
@@ -105,9 +108,17 @@ class Layer2Orchestrator:
         for sector, count in sector_counts.items():
             if count >= self.ANOMALY_COUNT:
                 print(f"[L2 Orchestrator] SWARM ANOMALY in sector {sector}: {count} agents >= {self.ANOMALY_PRESSURE}")
-                return True
-        return False
+                return sector
+        return None
 
+    def _can_emit(self, sector: str) -> bool:
+        now = time.time()
+        last = self.last_emission.get(sector, 0)
+        if (now - last) >= self.COOLDOWN_SECONDS:
+            self.last_emission[sector] = now
+            return True
+        return False
+    
     def emit_tactical_policy(self, pub_socket):
         policy = {
             "type": "tactical_pressure_cap",

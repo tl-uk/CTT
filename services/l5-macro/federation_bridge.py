@@ -2,7 +2,8 @@
 """
 services/l5-macro/federation_bridge.py
 
-Phase 6 — L5 Macro & Federation Bridge (ZMQ-only, audit-logger pattern).
+Phase 6.5 — L5 Macro & Federation Bridge (ZMQ resilience hardened).
+Uses get_resilient_socket to prevent "Address already in use" on rapid restarts.
 """
 import json
 import os
@@ -24,12 +25,12 @@ ZMQ_TELEMETRY_SUB = ZMQ_PORTS.get("L1_TELEMETRY_SUB", "tcp://localhost:5555")
 class FederationBridge:
     def __init__(self):
         self.ctx = zmq.Context()
-        self.policy_pub = self.ctx.socket(zmq.PUB)
+        # Phase 6.5: Use resilient sockets (LINGER=0 prevents TIME_WAIT on restart)
+        self.policy_pub = get_resilient_socket(self.ctx, zmq.PUB, is_sub=False)
         self.policy_pub.bind(ZMQ_POLICY_PUB)
-        self.tele_sub = self.ctx.socket(zmq.SUB)
+        self.tele_sub = get_resilient_socket(self.ctx, zmq.SUB, is_sub=True)
         self.tele_sub.connect(ZMQ_TELEMETRY_SUB)
         self.tele_sub.setsockopt_string(zmq.SUBSCRIBE, "")
-        self.tele_sub.set(zmq.RCVTIMEO, 2000)
         self._running = False
         self.window = defaultdict(list)
 
@@ -65,12 +66,12 @@ class FederationBridge:
     def _evaluate_and_emit(self):
         local_pressures = self.window.get(CITY_ID, [])
         if not local_pressures:
-            print(f"[FederationBridge] 📊 {CITY_ID} window empty — no data yet")
+            print(f"[FederationBridge] {CITY_ID} window empty — no data yet")
             return
 
         avg_pressure = sum(local_pressures) / len(local_pressures)
         self.window.clear()
-        print(f"[FederationBridge] 📊 {CITY_ID} avg pressure={avg_pressure:.1f}")
+        print(f"[FederationBridge] {CITY_ID} avg pressure={avg_pressure:.1f}")
 
         if avg_pressure > 60.0:
             policy = {
@@ -90,7 +91,7 @@ class FederationBridge:
             }
             try:
                 self.policy_pub.send_string(json.dumps(policy))
-                print(f"[FederationBridge] 🏛️ EMITTED local policy: pressure_cap=75.0")
+                print(f"[FederationBridge] EMITTED local policy: pressure_cap=75.0")
             except Exception as e:
                 print(f"[FederationBridge] ZMQ publish failed: {e}")
 
@@ -102,10 +103,10 @@ if __name__ == "__main__":
     try:
         bridge.run()
     except KeyboardInterrupt:
-        print("\n🛑 Federation bridge stopping...")
+        print("\\n🛑 Federation bridge stopping...")
         bridge.stop()
     except Exception as e:
         import traceback
-        print(f"\n💥 Fatal: {e}")
+        print(f"\\n💥 Fatal: {e}")
         traceback.print_exc()
         bridge.stop()

@@ -1,4 +1,7 @@
+# ---------------------------------
 # services/l6-gaiax/requirements.txt
+# ---------------------------------
+
 pyzmq==27.1.0
 requests==2.32.4
 python-dotenv>=1.0.0

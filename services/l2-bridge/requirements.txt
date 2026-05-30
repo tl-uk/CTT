@@ -1,5 +1,5 @@
 # ---------------------------------
-# l2-bridge/requirements.txt
+# services/l2-bridge/requirements.txt
 # ---------------------------------
 
 pyzmq==27.1.0

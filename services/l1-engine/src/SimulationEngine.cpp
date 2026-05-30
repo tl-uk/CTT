@@ -3,6 +3,7 @@
 #include <iostream>
 #include <random>
 #include <cmath>
+#include <cstdlib>  // for std::getenv
 
 namespace CTT {
 
@@ -10,9 +11,13 @@ SimulationEngine::SimulationEngine() {
     world.import<flecs::stats>();
 
 #ifdef FLECS_REST
-    ECS_IMPORT(world.c_ptr(), FlecsRest);
-    world.set<EcsRest>({ .port = 27750 });
-    std::cout << "[L3 Core] REST API active on port 27750" << std::endl;
+    // Phase 6.5: REST is opt-in via env var to avoid progress() stalls
+    const char* enable_rest = std::getenv("CTT_ENABLE_REST");
+    if (enable_rest && std::string(enable_rest) == "1") {
+        ECS_IMPORT(world.c_ptr(), FlecsRest);
+        world.set<EcsRest>({ .port = 27750 });
+        std::cout << "[L3 Core] REST API active on port 27750" << std::endl;
+    }
 #endif
 
     register_reflection();
@@ -42,6 +47,7 @@ void SimulationEngine::register_systems() {
 
     // --- SYSTEM 2: SCHMITT TRIGGER (HDS Cognitive Logic) ---
     // Runs in PreUpdate, after MarketPressureSystem, using jittered thresholds.
+    // Phase 6.5: Single-line logging to reduce Docker stdout pressure.
     world.system<MindsetComponent>("SchmittTriggerSystem")
         .kind(flecs::PreUpdate) 
         .each([](flecs::iter& it, size_t i, MindsetComponent& m) {
@@ -54,14 +60,14 @@ void SimulationEngine::register_systems() {
             if (!m.is_decarbonized) {
                 if (m.adversarial_pressure >= effective_high) {
                     m.is_decarbonized = true;
-                    std::cout << "[L3] Agent " << entity.name() 
-                              << " switched to GREEN (threshold=" << effective_high << ")." << std::endl;
+                    std::cout << "[L3] " << entity.name() 
+                              << " -> GREEN (thr=" << effective_high << ")" << std::endl;
                 }
             } else {
                 if (m.adversarial_pressure <= effective_low) {
                     m.is_decarbonized = false;
-                    std::cout << "[L3] Agent " << entity.name() 
-                              << " regressed to LEGACY (threshold=" << effective_low << ")." << std::endl;
+                    std::cout << "[L3] " << entity.name() 
+                              << " -> LEGACY (thr=" << effective_low << ")" << std::endl;
                 }
             }
         });

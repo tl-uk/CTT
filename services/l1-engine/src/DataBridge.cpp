@@ -150,34 +150,34 @@ void DataBridge::poll_perturbations(ThreadSafePerturbationQueue& queue) {
 }
 
 void DataBridge::apply_perturbations(flecs::world& world, const std::vector<PerturbationCmd>& cmds) {
-    for (const auto& cmd : cmds) {
-        std::cout << "[L2 Bridge] 📥 RAW RECEIVED: agent=" << cmd.agent_uuid 
-                  << " delta=" << cmd.pressure_delta 
-                  << " source=" << cmd.source << std::endl;
+    if (cmds.empty()) {
+        return;
+    }
 
+    size_t affected_count = 0;
+
+    for (const auto& cmd : cmds) {
         if (cmd.agent_uuid == "all_hgv" || cmd.agent_uuid == "all") {
             auto q = world.query<MindsetComponent>();
             q.each([&](flecs::entity e, MindsetComponent& m) {
-                std::cout << "[L2 Bridge] 🔄 BEFORE: " << e.name() 
-                          << " pressure=" << m.adversarial_pressure << std::endl;
                 m.adversarial_pressure += cmd.pressure_delta;
-                std::cout << "[L2 Bridge] ✅ AFTER: " << e.name() 
-                          << " pressure=" << m.adversarial_pressure << std::endl;
+                affected_count++;
             });
         } else {
             auto e = world.lookup(cmd.agent_uuid.c_str());
             if (e.is_alive()) {
                 auto& m = e.get_mut<MindsetComponent>();
-                std::cout << "[L2 Bridge] 🔄 BEFORE: " << e.name() 
-                          << " pressure=" << m.adversarial_pressure << std::endl;
                 m.adversarial_pressure += cmd.pressure_delta;
-                std::cout << "[L2 Bridge] ✅ AFTER: " << e.name() 
-                          << " pressure=" << m.adversarial_pressure << std::endl;
+                affected_count++;
             } else {
                 std::cerr << "[L2 Bridge] ⚠️  Entity not found: " << cmd.agent_uuid << std::endl;
             }
         }
     }
+
+    // Phase 6.5: Single summary line instead of per-agent spam
+    std::cout << "[L2 Bridge] Applied " << cmds.size() << " perturbation command(s), "
+              << affected_count << " agent(s) affected" << std::endl;
 }
 
 std::string DataBridge::snapshot_world(flecs::world& world) {

@@ -1,5 +1,5 @@
 # ---------------------------------
-# l3-analytics/requirements.txt
+# services/l3-analytics/requirements.txt
 # ---------------------------------
 numpy==2.3.1
 pandas==2.3.0

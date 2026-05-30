@@ -1,6 +1,6 @@
 # CTT Project Structure
 
-**Generated:** Fri May 29 19:39:09 BST 2026
+**Generated:** Sat May 30 14:51:50 BST 2026
 
 ```
 └── CTT
@@ -13,7 +13,9 @@
     │       └── ctt_messages.proto
     ├── deploy
     │   ├── docker-compose-redpanda.yml
+    │   ├── docker-compose.domain-dhl.yml
     │   ├── docker-compose.yml
+    │   ├── domains.yaml
     │   └── grafana
     │       ├── dashboards
     │       │   └── ctt-dashboard.json
@@ -21,12 +23,14 @@
     │           └── ctt-api.yaml
     ├── scripts
     │   ├── diag_bat_key.py
+    │   ├── generate_domain_compose.py
     │   ├── generate_project_tree.py
     │   ├── monitor_pipeline.py
     │   ├── observe_pipeline.py
     │   ├── test_bat_api.py
     │   ├── test_bat_bus.py
     │   ├── test_e2e.py
+    │   ├── test_multi_domain.py
     │   ├── test_py_cpp_bridge.py
     │   └── test_sme_feed.py
     └── services
@@ -65,7 +69,6 @@
         ├── l2-bridge
         │   ├── Dockerfile
         │   ├── dashboard.py
-        │   ├── orchestrator.py
         │   └── requirements.txt
         ├── l2-orchestrator
         │   ├── Dockerfile

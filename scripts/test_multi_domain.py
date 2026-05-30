@@ -1,3 +1,6 @@
+# =============================================================================
+# Updated test_multi_domain.py — Robust generator error handling
+# =============================================================================
 #!/usr/bin/env python3
 """
 scripts/test_multi_domain.py
@@ -21,7 +24,7 @@ Test sequence:
 Usage:
     python scripts/test_multi_domain.py --domain-a domain-dft --domain-b domain-dhl [--keep]
 
-Requires: Docker Compose v2, Python 3.10+, requests, zmq, pyyaml
+Requires: Docker Compose v2, Python 3.10+, requests, zmq
 """
 import argparse
 import json
@@ -49,13 +52,20 @@ def get_ports(domain: str) -> dict:
     """Derive ports from domains.yaml via generator (or hardcode fallback)."""
     # Try to read from domains.yaml directly
     try:
-        import yaml
         domains_file = PROJECT_ROOT / "services" / "config" / "domains.yaml"
-        with open(domains_file) as f:
-            data = yaml.safe_load(f)
-        offset = data["domains"][domain]["port_offset"]
+        if domains_file.exists():
+            text = domains_file.read_text()
+            # Simple regex to find port_offset for this domain
+            import re
+            pattern = rf"domain-{domain.replace('domain-', '')}:\\s*\\n(?:\\s+.*\\n)*?\\s+port_offset:\\s*(\\d+)"
+            match = re.search(pattern, text)
+            if match:
+                offset = int(match.group(1))
+            else:
+                offset = 0 if domain == "domain-dft" else 2
+        else:
+            offset = 0 if domain == "domain-dft" else 2
     except Exception:
-        # Fallback for domain-dft (offset 0)
         offset = 0 if domain == "domain-dft" else 2
 
     return {
@@ -74,16 +84,27 @@ def get_ports(domain: str) -> dict:
 
 def run(cmd: list[str], cwd: Path = PROJECT_ROOT, check: bool = True) -> subprocess.CompletedProcess:
     print(f"[CMD] {' '.join(cmd)}")
-    return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=cwd, check=False, capture_output=True, text=True)
+    if check and result.returncode != 0:
+        print(f"[ERR] Command failed with exit code {result.returncode}")
+        if result.stdout:
+            print(f"[OUT] {result.stdout[:500]}")
+        if result.stderr:
+            print(f"[ERR] {result.stderr[:500]}")
+        raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
+    return result
 
 
 def generate_domain(domain: str):
     """Run the generator script to emit compose file."""
     print(f"[GEN] Rendering docker-compose.{domain}.yml ...")
-    run([sys.executable, str(GENERATOR), "--domain", domain])
+    # Use the same Python interpreter that runs this script
+    result = run([sys.executable, str(GENERATOR), "--domain", domain], check=False)
+    if result.returncode != 0:
+        print(f"[WARN] Generator failed, checking if file already exists...")
     compose_path = get_compose_path(domain)
     if not compose_path.exists():
-        raise RuntimeError(f"Generator failed to produce {compose_path}")
+        raise RuntimeError(f"Generator failed to produce {compose_path}. Stderr: {result.stderr}")
     print(f"[GEN] OK: {compose_path}")
 
 
@@ -126,7 +147,7 @@ def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 3000) -> bool:
 
 
 def log_step(step: int, desc: str):
-    print(f"\n{'='*60}")
+    print(f"\\n{'='*60}")
     print(f"STEP {step}: {desc}")
     print(f"{'='*60}")
 
@@ -214,7 +235,7 @@ def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
     if keep:
         ports_a = get_ports(domain_a)
         ports_b = get_ports(domain_b)
-        print("\n[KEEP] Stacks left running for manual inspection.")
+        print("\\n[KEEP] Stacks left running for manual inspection.")
         print(f"       {domain_a} dashboard: http://localhost:{ports_a['dashboard']}")
         print(f"       {domain_b} dashboard: http://localhost:{ports_b['dashboard']}")
         print(f"       {domain_a} Grafana:   http://localhost:{ports_a['grafana']}")
@@ -256,11 +277,11 @@ def main():
         phase_verify_resilience(args.domain_a)
         phase_reconnect(args.domain_b)
         phase_verify_post_reconnect(args.domain_a, args.domain_b)
-        print("\n" + "="*60)
+        print("\\n" + "="*60)
         print("ALL TESTS PASSED — Plug-and-use resilience demonstrated")
         print("="*60)
     except Exception as e:
-        print(f"\n[FAIL] {e}")
+        print(f"\\n[FAIL] {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

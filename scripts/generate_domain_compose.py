@@ -1,10 +1,13 @@
+# =============================================================================
+# FIXED generate_domain_compose.py — No PyYAML dependency, pure Python parser
+# =============================================================================
 #!/usr/bin/env python3
 """
 scripts/generate_domain_compose.py
 
 CTT Multi-Stakeholder Domain Compose Generator
 Reads services/config/domains.yaml and emits docker-compose.<domain>.yml
-from a single Jinja2-like template (no external deps beyond PyYAML).
+Pure Python — no PyYAML required.
 
 Usage:
     python scripts/generate_domain_compose.py --domain domain-dhl
@@ -17,23 +20,14 @@ Design rationale:
 """
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
-
-# PyYAML is usually available; if not, we fall back to a minimal YAML dumper
-try:
-    import yaml
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
 
 PROJECT_ROOT = Path(__file__).parent.parent
 DOMAINS_YAML = PROJECT_ROOT / "services" / "config" / "domains.yaml"
 OUTPUT_DIR = PROJECT_ROOT / "deploy"
 
-# =============================================================================
-# Base port map (domain-dft / offset=0)
-# =============================================================================
 BASE_PORTS = {
     "engine_telemetry": 5555,
     "fusion_pub": 5556,
@@ -47,14 +41,78 @@ BASE_PORTS = {
 }
 
 
-def load_domains():
-    if not DOMAINS_YAML.exists():
-        raise FileNotFoundError(f"Domain registry not found: {DOMAINS_YAML}")
-    if HAS_YAML:
-        with open(DOMAINS_YAML) as f:
-            return yaml.safe_load(f)
-    else:
-        raise RuntimeError("PyYAML required. Install: pip install pyyaml")
+def parse_yaml_simple(path: Path) -> dict:
+    """Minimal YAML parser for domains.yaml structure — no PyYAML needed."""
+    text = path.read_text()
+    data = {"domains": {}}
+    current_domain = None
+    current_key = None
+    current_list = None
+    in_peers = False
+    peer_obj = None
+
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line or line.strip().startswith("#"):
+            continue
+        
+        indent = len(line) - len(line.lstrip())
+        stripped = line.strip()
+        
+        # Top-level domain start: "  domain-xxx:"
+        if indent == 2 and stripped.endswith(":") and not stripped.startswith("-"):
+            current_domain = stripped[:-1]
+            data["domains"][current_domain] = {}
+            current_key = None
+            current_list = None
+            in_peers = False
+            continue
+        
+        if current_domain is None:
+            continue
+        
+        # Key-value pairs
+        if indent == 4 and ":" in stripped and not stripped.startswith("-"):
+            key, val = stripped.split(":", 1)
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if val == "":
+                # Could be a list start
+                data["domains"][current_domain][key] = []
+                current_list = key
+                current_key = None
+                if key == "federation_peers":
+                    in_peers = True
+                else:
+                    in_peers = False
+            else:
+                data["domains"][current_domain][key] = val
+                current_key = key
+                current_list = None
+            continue
+        
+        # List items under federation_peers
+        if in_peers and indent >= 6 and stripped.startswith("-"):
+            item = stripped[1:].strip()
+            if indent == 6:
+                # New peer object
+                peer_obj = {}
+                data["domains"][current_domain]["federation_peers"].append(peer_obj)
+                if ":" in item:
+                    k, v = item.split(":", 1)
+                    peer_obj[k.strip()] = v.strip().strip('"').strip("'")
+            elif indent >= 8 and peer_obj is not None and ":" in item:
+                k, v = item.split(":", 1)
+                peer_obj[k.strip()] = v.strip().strip('"').strip("'")
+            continue
+        
+        # Simple list items (not peers)
+        if current_list is not None and not in_peers and indent == 6 and stripped.startswith("-"):
+            item = stripped[1:].strip().strip('"').strip("'")
+            data["domains"][current_domain][current_list].append(item)
+            continue
+    
+    return data
 
 
 def shifted_ports(offset: int) -> dict:
@@ -66,7 +124,7 @@ def generate_compose(domain_id: str, domains_data: dict) -> str:
     if not domain:
         raise ValueError(f"Domain '{domain_id}' not found in {DOMAINS_YAML}")
 
-    offset = domain.get("port_offset", 0)
+    offset = int(domain.get("port_offset", 0))
     ports = shifted_ports(offset)
     network = domain.get("network", f"ctt-{domain_id}")
     city_id = domain.get("city_id", domain_id)
@@ -74,16 +132,14 @@ def generate_compose(domain_id: str, domains_data: dict) -> str:
     description = domain.get("description", "")
     peers = domain.get("federation_peers", [])
 
-    # Build CTT_FEDERATION_PEER env var from peers list
     peer_envs = []
     for peer in peers:
-        peer_envs.append(
-            f"      - CTT_FEDERATION_PEER_{peer['target'].replace('-', '_').upper()}="
-            f"{peer['address']}"
-        )
-    peer_env_block = "\n".join(peer_envs) if peer_envs else "      # No federation peers configured"
+        target = peer.get("target", "unknown")
+        addr = peer.get("address", "")
+        env_name = f"CTT_FEDERATION_PEER_{target.replace('-', '_').upper()}"
+        peer_envs.append(f"      - {env_name}={addr}")
+    peer_env_block = "\\n".join(peer_envs) if peer_envs else "      # No federation peers configured"
 
-    # Build shared federation network attachment if peers exist
     extra_networks = ""
     if peers:
         extra_networks = f"""
@@ -381,18 +437,22 @@ def main():
     parser.add_argument("--output-dir", default=str(OUTPUT_DIR), help="Output directory")
     args = parser.parse_args()
 
-    data = load_domains()
+    if not DOMAINS_YAML.exists():
+        print(f"[ERR] Domain registry not found: {DOMAINS_YAML}")
+        sys.exit(1)
+
+    data = parse_yaml_simple(DOMAINS_YAML)
     compose_text = generate_compose(args.domain, data)
 
     out_path = Path(args.output_dir) / f"docker-compose.{args.domain}.yml"
     out_path.write_text(compose_text)
     print(f"[OK] Generated {out_path}")
-    print(f"     Ports shifted by offset {data['domains'][args.domain]['port_offset']}")
-    print(f"     Network: {data['domains'][args.domain]['network']}")
+    print(f"     Ports shifted by offset {data['domains'][args.domain].get('port_offset', 0)}")
+    print(f"     Network: {data['domains'][args.domain].get('network', 'ctt-' + args.domain)}")
     if data['domains'][args.domain].get('federation_peers'):
-        peers = [p['target'] for p in data['domains'][args.domain]['federation_peers']]
+        peers = [p.get('target', '?') for p in data['domains'][args.domain]['federation_peers']]
         print(f"     Federation peers: {', '.join(peers)}")
-    print(f"\nTo deploy:")
+    print(f"\\nTo deploy:")
     print(f"    docker-compose -f deploy/docker-compose.{args.domain}.yml up --build -d")
 
 

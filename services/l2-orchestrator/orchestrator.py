@@ -1,3 +1,6 @@
+# =============================================================================
+# FIXED orchestrator.py — Suppress repeated anomaly logs during cooldown
+# =============================================================================
 """
 services/l2-orchestrator/orchestrator.py
 
@@ -6,6 +9,9 @@ Runs as a separate container for clean failure isolation and independent scaling
 
 Detects swarm anomalies (3+ agents in same sector hitting pressure >= 80)
 and emits tactical policy adjustments to mitigate cascading failures.
+
+Phase 6.5 fix: Per-sector cooldown prevents spam when agents remain in anomaly state.
+Also suppresses repeated anomaly log messages during cooldown.
 """
 import json
 import os
@@ -38,6 +44,7 @@ class Layer2Orchestrator:
         self.agent_history = {}
         self.sector_state = {}
         self.last_emission = {}  # sector -> timestamp
+        self.last_log = {}       # sector -> timestamp (suppress log spam)
 
     def start(self):
         if self._running:
@@ -69,8 +76,15 @@ class Layer2Orchestrator:
                 msg = tele_sub.recv_string()
                 agents = json.loads(msg)
                 self.update_windows(agents)
-                if self.detect_swarm_anomaly():
-                    self.emit_tactical_policy(tactical_pub)
+                sector = self.detect_swarm_anomaly()
+                if sector:
+                    # Only log anomaly if we haven't logged it recently
+                    if self._can_log(sector):
+                        print(f"[L2 Orchestrator] SWARM ANOMALY in sector {sector}: "
+                              f"{self._count_in_sector(sector)} agents >= {self.ANOMALY_PRESSURE}")
+                    # Only emit policy if cooldown has elapsed
+                    if self._can_emit(sector):
+                        self.emit_tactical_policy(tactical_pub, sector)
             except json.JSONDecodeError as e:
                 print(f"[L2 Orchestrator] JSON parse error: {e}")
             except zmq.error.Again:
@@ -96,6 +110,16 @@ class Layer2Orchestrator:
                 self.agent_history[name] = deque(maxlen=self.WINDOW_SIZE)
             self.agent_history[name].append((now, pressure, sector))
 
+    def _count_in_sector(self, sector: str) -> int:
+        count = 0
+        for name, window in self.agent_history.items():
+            if not window:
+                continue
+            _, pressure, s = window[-1]
+            if s == sector and pressure >= self.ANOMALY_PRESSURE:
+                count += 1
+        return count
+
     def detect_swarm_anomaly(self):
         """Returns sector name if anomaly detected, else None."""
         sector_counts = defaultdict(int)
@@ -107,9 +131,16 @@ class Layer2Orchestrator:
                 sector_counts[sector] += 1
         for sector, count in sector_counts.items():
             if count >= self.ANOMALY_COUNT:
-                print(f"[L2 Orchestrator] SWARM ANOMALY in sector {sector}: {count} agents >= {self.ANOMALY_PRESSURE}")
                 return sector
         return None
+
+    def _can_log(self, sector: str) -> bool:
+        now = time.time()
+        last = self.last_log.get(sector, 0)
+        if (now - last) >= self.COOLDOWN_SECONDS:
+            self.last_log[sector] = now
+            return True
+        return False
 
     def _can_emit(self, sector: str) -> bool:
         now = time.time()
@@ -118,17 +149,17 @@ class Layer2Orchestrator:
             self.last_emission[sector] = now
             return True
         return False
-    
-    def emit_tactical_policy(self, pub_socket):
+
+    def emit_tactical_policy(self, pub_socket, sector: str):
         policy = {
             "type": "tactical_pressure_cap",
-            "sector": "SE1",
+            "sector": sector,
             "pressure_cap": 75.0,
             "source": "layer2_swarm_guard",
             "timestamp": time.time(),
         }
         pub_socket.send_string(json.dumps(policy))
-        print(f"[L2 Orchestrator] Tactical policy emitted: {policy}")
+        print(f"[L2 Orchestrator] Tactical policy emitted for {sector}: {policy}")
 
     def stop(self):
         self._running = False

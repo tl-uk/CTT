@@ -1,6 +1,3 @@
-# =============================================================================
-# FIXED orchestrator.py — Suppress repeated anomaly logs during cooldown
-# =============================================================================
 """
 services/l2-orchestrator/orchestrator.py
 

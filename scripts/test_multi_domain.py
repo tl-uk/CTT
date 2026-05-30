@@ -1,6 +1,3 @@
-# =============================================================================
-# Updated test_multi_domain.py — Robust generator error handling
-# =============================================================================
 #!/usr/bin/env python3
 """
 scripts/test_multi_domain.py
@@ -9,6 +6,10 @@ CTT Phase 6.5 — Multi-Stakeholder Federation E2E Test
 
 Validates plug-and-use resilience across two independent CTT domains.
 Uses scripts/generate_domain_compose.py to render compose files on-the-fly.
+
+Port semantics:
+  - Host (external) ports = BASE + offset  (used for ZMQ probes, REST curls)
+  - Container (internal) ports = BASE     (services hardcode bind addresses)
 
 Test sequence:
   1. Generate compose for domain-a and domain-b from domains.yaml
@@ -48,16 +49,20 @@ def get_compose_path(domain: str) -> Path:
     return PROJECT_ROOT / "deploy" / f"docker-compose.{domain}.yml"
 
 
-def get_ports(domain: str) -> dict:
-    """Derive ports from domains.yaml via generator (or hardcode fallback)."""
-    # Try to read from domains.yaml directly
+def get_host_ports(domain: str) -> dict:
+    """Return HOST (external) port numbers for probing from the Docker host.
+
+    Container ports remain at base values; only host-side mappings shift.
+    """
+    # Try to read offset from domains.yaml
     try:
         domains_file = PROJECT_ROOT / "services" / "config" / "domains.yaml"
         if domains_file.exists():
             text = domains_file.read_text()
-            # Simple regex to find port_offset for this domain
             import re
-            pattern = rf"domain-{domain.replace('domain-', '')}:\\s*\\n(?:\\s+.*\\n)*?\\s+port_offset:\\s*(\\d+)"
+            # Find port_offset under this domain block
+            domain_short = domain.replace("domain-", "")
+            pattern = rf"{re.escape(domain)}:\s*\n(?:\s+.*\n)*?\s+port_offset:\s*(\d+)"
             match = re.search(pattern, text)
             if match:
                 offset = int(match.group(1))
@@ -98,10 +103,9 @@ def run(cmd: list[str], cwd: Path = PROJECT_ROOT, check: bool = True) -> subproc
 def generate_domain(domain: str):
     """Run the generator script to emit compose file."""
     print(f"[GEN] Rendering docker-compose.{domain}.yml ...")
-    # Use the same Python interpreter that runs this script
     result = run([sys.executable, str(GENERATOR), "--domain", domain], check=False)
     if result.returncode != 0:
-        print(f"[WARN] Generator failed, checking if file already exists...")
+        print(f"[WARN] Generator exited {result.returncode}, checking if file already exists...")
     compose_path = get_compose_path(domain)
     if not compose_path.exists():
         raise RuntimeError(f"Generator failed to produce {compose_path}. Stderr: {result.stderr}")
@@ -110,7 +114,7 @@ def generate_domain(domain: str):
 
 def health_check(domain: str, timeout: int = 120) -> dict:
     """Poll dashboard /health until agents are online or timeout."""
-    ports = get_ports(domain)
+    ports = get_host_ports(domain)
     url = f"http://localhost:{ports['dashboard']}/health"
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -147,7 +151,7 @@ def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 3000) -> bool:
 
 
 def log_step(step: int, desc: str):
-    print(f"\\n{'='*60}")
+    print(f"\n{'='*60}")
     print(f"STEP {step}: {desc}")
     print(f"{'='*60}")
 
@@ -182,7 +186,7 @@ def phase_bring_up(domain: str, is_base: bool = False):
 def phase_verify_federation(domain_a: str, domain_b: str):
     log_step(3, "Verify ZMQ telemetry streams on both domains")
     for domain in (domain_a, domain_b):
-        ports = get_ports(domain)
+        ports = get_host_ports(domain)
         addr = f"tcp://localhost:{ports['telemetry_zmq']}"
         ok = zmq_probe(addr, timeout_ms=5000)
         status = "OK" if ok else "FAIL"
@@ -192,7 +196,7 @@ def phase_verify_federation(domain_a: str, domain_b: str):
 
     log_step(4, "Verify tactical policy streams")
     for domain in (domain_a, domain_b):
-        ports = get_ports(domain)
+        ports = get_host_ports(domain)
         addr = f"tcp://localhost:{ports['tactical_zmq']}"
         ok = zmq_probe(addr, timeout_ms=2000)
         print(f"  [{domain}] Tactical ZMQ {addr} -> {'OK' if ok else 'NO_MSG (expected if no anomaly)'}")
@@ -222,7 +226,7 @@ def phase_reconnect(domain_b: str):
 def phase_verify_post_reconnect(domain_a: str, domain_b: str):
     log_step(8, "Verify federation resumes after reconnect")
     for domain in (domain_a, domain_b):
-        ports = get_ports(domain)
+        ports = get_host_ports(domain)
         addr = f"tcp://localhost:{ports['telemetry_zmq']}"
         ok = zmq_probe(addr, timeout_ms=8000)
         status = "RESUMED" if ok else "FAIL"
@@ -233,9 +237,9 @@ def phase_verify_post_reconnect(domain_a: str, domain_b: str):
 
 def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
     if keep:
-        ports_a = get_ports(domain_a)
-        ports_b = get_ports(domain_b)
-        print("\\n[KEEP] Stacks left running for manual inspection.")
+        ports_a = get_host_ports(domain_a)
+        ports_b = get_host_ports(domain_b)
+        print("\n[KEEP] Stacks left running for manual inspection.")
         print(f"       {domain_a} dashboard: http://localhost:{ports_a['dashboard']}")
         print(f"       {domain_b} dashboard: http://localhost:{ports_b['dashboard']}")
         print(f"       {domain_a} Grafana:   http://localhost:{ports_a['grafana']}")
@@ -260,6 +264,7 @@ def main():
     parser.add_argument("--domain-b", required=True, help="Peer domain (e.g., domain-dhl, domain-tesco)")
     parser.add_argument("--keep", action="store_true", help="Leave stacks running after test")
     parser.add_argument("--skip-generate", action="store_true", help="Skip compose generation (use existing files)")
+    parser.add_argument("--skip-base-rebuild", action="store_true", help="Skip tearing down/rebuilding domain-a (DfT)")
     args = parser.parse_args()
 
     print(f"CTT Phase 6.5 — Multi-Stakeholder Federation E2E Test")
@@ -270,18 +275,23 @@ def main():
     try:
         if not args.skip_generate:
             phase_generate(args.domain_a, args.domain_b)
-        phase_bring_up(args.domain_a, is_base=True)
+        if not args.skip_base_rebuild:
+            phase_bring_up(args.domain_a, is_base=True)
+        else:
+            print(f"\n[SKIP] Assuming {args.domain_a} is already running")
+            data = health_check(args.domain_a, timeout=30)
+            print(f"  [{args.domain_a}] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
         phase_bring_up(args.domain_b)
         phase_verify_federation(args.domain_a, args.domain_b)
         phase_resilience_disconnect(args.domain_b)
         phase_verify_resilience(args.domain_a)
         phase_reconnect(args.domain_b)
         phase_verify_post_reconnect(args.domain_a, args.domain_b)
-        print("\\n" + "="*60)
+        print("\n" + "="*60)
         print("ALL TESTS PASSED — Plug-and-use resilience demonstrated")
         print("="*60)
     except Exception as e:
-        print(f"\\n[FAIL] {e}")
+        print(f"\n[FAIL] {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

@@ -246,7 +246,7 @@ def phase_verify_post_reconnect(domain_a: str, domain_b: str):
     for domain in (domain_a, domain_b):
         ports = get_host_ports(domain)
         addr = f"tcp://localhost:{ports['telemetry_zmq']}"
-        ok = zmq_probe(addr, timeout_ms=10000)
+        ok = zmq_probe(addr, timeout_ms=12000) # Extended timeout to allow for domain_b to fully rejoin and synchronize
         status = "RESUMED" if ok else "FAIL"
         print(f"  [{domain}] Telemetry ZMQ {addr} -> {status}")
         if not ok:

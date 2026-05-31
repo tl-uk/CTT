@@ -184,19 +184,20 @@ def generate_domain(domain: str):
         raise RuntimeError(f"Generator failed to produce {compose_path}. Stderr: {result.stderr}")
     print(f"[GEN] OK: {compose_path}")
 
-
-# In phase_bring_up (non-base path):
 def phase_bring_up(domain: str, is_base: bool = False):
     log_step(1 if is_base else 2, f"Bring up {domain}")
     if is_base:
         compose = COMPOSE_BASE
-        run(["docker-compose", "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
+        # FIX: Isolate base project to prevent cross-domain orphan killing
+        run(["docker-compose", "-p", "ctt-dft", "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
+        run(["docker-compose", "-p", "ctt-dft", "-f", str(compose), "up", "--build", "-d"])
     else:
         compose = get_compose_path(domain)
         project_name = domain.replace("domain-", "ctt-")
-        # CRITICAL: Use -p to isolate project, preventing base container destruction
         run(["docker-compose", "-p", project_name, "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
         run(["docker-compose", "-p", project_name, "-f", str(compose), "up", "--build", "-d"])
+    data = health_check(domain)
+    print(f"  [{domain}] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
 
 def phase_verify_federation(domain_a: str, domain_b: str):
     """Phase 6.5: Verify telemetry via REST (dashboard already consumes ZMQ).
@@ -268,10 +269,17 @@ def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
         return
 
     log_step(9, "Cleanup: tear down both domains")
+    # FIX: Define project_name_b before use
+    project_name_b = domain_b.replace("domain-", "ctt-")
     run(["docker-compose", "-p", project_name_b, "-f", str(get_compose_path(domain_b)), "down", "--volumes", "--remove-orphans"], check=False)
+    
     if domain_a != "domain-dft":
         project_name_a = domain_a.replace("domain-", "ctt-")
         run(["docker-compose", "-p", project_name_a, "-f", str(get_compose_path(domain_a)), "down", "--volumes", "--remove-orphans"], check=False)
+    else:
+        # Base domain also needs project isolation to prevent cross-domain orphan killing
+        run(["docker-compose", "-p", "ctt-dft", "-f", str(COMPOSE_BASE), "down", "--volumes", "--remove-orphans"], check=False)
+    
     print("[OK] All stacks torn down")
 
 

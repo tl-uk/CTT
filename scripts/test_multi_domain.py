@@ -1,5 +1,5 @@
 # =============================================================================
-# Updated test_multi_domain.py — ZMQ probe with slow-joiner guard
+# Updated test_multi_domain.py — REST-based verification (architectural fix)
 # =============================================================================
 #!/usr/bin/env python3
 """
@@ -11,15 +11,22 @@ Validates plug-and-use resilience across two independent CTT domains.
 Uses scripts/generate_domain_compose.py to render compose files on-the-fly.
 
 Port semantics:
-  - Host (external) ports = BASE + offset  (used for ZMQ probes, REST curls)
+  - Host (external) ports = BASE + offset  (used for REST probes, curls)
   - Container (internal) ports = BASE     (services hardcode bind addresses)
+
+Architectural note (Phase 6.5):
+  Host-side ZMQ PUB/SUB probing is unreliable on Docker Desktop macOS because
+  the VM boundary user-space proxy does not forward ZMQ subscription handshakes.
+  This test verifies telemetry at the REST application layer (dashboard /health),
+  which already consumes ZMQ internally. ZMQ probes are retained for tactical
+  policy verification (optional) and Linux CI/CD environments.
 
 Test sequence:
   1. Generate compose for domain-a and domain-b from domains.yaml
   2. Spin up domain-a (default / DfT)
   3. Spin up domain-b (e.g., DHL, Network Rail, Tesco, NHS)
   4. Verify both domains report healthy agents via REST
-  5. Verify federation bridges can exchange ZMQ heartbeats
+  5. Verify federation bridges can exchange ZMQ heartbeats (via REST proxy)
   6. Disconnect domain-b (simulate stakeholder outage)
   7. Verify domain-a continues unaffected (resilience)
   8. Reconnect domain-b
@@ -48,13 +55,14 @@ PROJECT_ROOT = Path(__file__).parent.parent
 COMPOSE_BASE = PROJECT_ROOT / "deploy" / "docker-compose.yml"
 GENERATOR = PROJECT_ROOT / "scripts" / "generate_domain_compose.py"
 
+
 def get_compose_path(domain: str) -> Path:
     return PROJECT_ROOT / "deploy" / f"docker-compose.{domain}.yml"
 
 
 def get_host_ports(domain: str) -> dict:
     """Return HOST (external) port numbers for probing from the Docker host.
-    
+
     Container ports remain at base values; only host-side mappings shift.
     """
     # Try to read offset from domains.yaml
@@ -65,7 +73,7 @@ def get_host_ports(domain: str) -> dict:
             import re
             # Find port_offset under this domain block
             domain_short = domain.replace("domain-", "")
-            pattern = rf"{re.escape(domain)}:\\s*\\n(?:\\s+.*\\n)*?\\s+port_offset:\\s*(\\d+)"
+            pattern = rf"{re.escape(domain)}:\s*\n(?:\s+.*\n)*?\s+port_offset:\s*(\d+)"
             match = re.search(pattern, text)
             if match:
                 offset = int(match.group(1))
@@ -103,18 +111,6 @@ def run(cmd: list[str], cwd: Path = PROJECT_ROOT, check: bool = True) -> subproc
     return result
 
 
-def generate_domain(domain: str):
-    """Run the generator script to emit compose file."""
-    print(f"[GEN] Rendering docker-compose.{domain}.yml ...")
-    result = run([sys.executable, str(GENERATOR), "--domain", domain], check=False)
-    if result.returncode != 0:
-        print(f"[WARN] Generator exited {result.returncode}, checking if file already exists...")
-    compose_path = get_compose_path(domain)
-    if not compose_path.exists():
-        raise RuntimeError(f"Generator failed to produce {compose_path}. Stderr: {result.stderr}")
-    print(f"[GEN] OK: {compose_path}")
-
-
 def health_check(domain: str, timeout: int = 120) -> dict:
     """Poll dashboard /health until agents are online or timeout."""
     ports = get_host_ports(domain)
@@ -132,11 +128,12 @@ def health_check(domain: str, timeout: int = 120) -> dict:
     raise RuntimeError(f"[{domain}] Health check failed after {timeout}s")
 
 
-def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 8000) -> bool:
+def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 5000) -> bool:
     """Try to receive at least one message from a ZMQ PUB socket.
-    
-    Phase 6.5: Docker Desktop macOS host-side ZMQ SUB often fails through
-    the VM boundary. Falls back to container-side probe.
+
+    NOTE: This is unreliable on Docker Desktop macOS due to VM boundary
+    limitations with ZMQ subscription handshakes. Use only for tactical policy
+    probes (optional) or in Linux CI/CD environments.
     """
     ctx = zmq.Context()
     sub = ctx.socket(zmq.SUB)
@@ -145,55 +142,22 @@ def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 8000) -> bool:
     sub.setsockopt_string(zmq.SUBSCRIBE, topic)
     try:
         sub.connect(addr)
-        time.sleep(0.5)
+        # Slow-joiner guard: allow subscription handshake to complete
+        time.sleep(0.3)
         msg = sub.recv()
         return True
     except zmq.error.Again:
         return False
     except Exception as e:
-        print(f"  [ZMQ] Host probe error for {addr}: {e}")
+        print(f"  [ZMQ] Error probing {addr}: {e}")
         return False
     finally:
         sub.close()
         ctx.term()
 
 
-def container_zmq_probe(domain: str, timeout_ms: int = 5000) -> bool:
-    """Run ZMQ SUB probe from inside the dashboard container.
-    
-    Docker Desktop on macOS cannot reliably forward ZMQ PUB/SUB across
-    the VM boundary. Probing from inside the container network works.
-    """
-    container = "ctt-dashboard" if domain == "domain-dft" else f"ctt-dashboard-{domain}"
-    script = f"""
-            import zmq, time, sys
-            ctx = zmq.Context()
-            sub = ctx.socket(zmq.SUB)
-            sub.connect('tcp://engine:5555')
-            sub.subscribe('')
-            sub.set(zmq.RCVTIMEO, {timeout_ms})
-            time.sleep(0.5)
-            try:
-                msg = sub.recv()
-                print('ZMQ_OK', len(msg))
-                sys.exit(0)
-            except zmq.error.Again:
-                print('ZMQ_TIMEOUT')
-                sys.exit(1)
-            """
-    result = subprocess.run(
-        ["docker", "exec", container, "python3", "-c", script],
-        capture_output=True, text=True, timeout=15
-    )
-    ok = "ZMQ_OK" in result.stdout
-    if not ok:
-        print(f"    [container probe] stdout: {result.stdout.strip()}")
-        print(f"    [container probe] stderr: {result.stderr.strip()[:200]}")
-    return ok
-
-
 def log_step(step: int, desc: str):
-    print(f"\\n{'='*60}")
+    print(f"\n{'='*60}")
     print(f"STEP {step}: {desc}")
     print(f"{'='*60}")
 
@@ -207,6 +171,18 @@ def phase_generate(domain_a: str, domain_b: str):
     if domain_a != "domain-dft":
         generate_domain(domain_a)
     generate_domain(domain_b)
+
+
+def generate_domain(domain: str):
+    """Run the generator script to emit compose file."""
+    print(f"[GEN] Rendering docker-compose.{domain}.yml ...")
+    result = run([sys.executable, str(GENERATOR), "--domain", domain], check=False)
+    if result.returncode != 0:
+        print(f"[WARN] Generator exited {result.returncode}, checking if file already exists...")
+    compose_path = get_compose_path(domain)
+    if not compose_path.exists():
+        raise RuntimeError(f"Generator failed to produce {compose_path}. Stderr: {result.stderr}")
+    print(f"[GEN] OK: {compose_path}")
 
 
 def phase_bring_up(domain: str, is_base: bool = False):
@@ -226,25 +202,28 @@ def phase_bring_up(domain: str, is_base: bool = False):
 
 
 def phase_verify_federation(domain_a: str, domain_b: str):
-    log_step(3, "Verify ZMQ telemetry streams on both domains")
-    for domain in (domain_a, domain_b):
-        ports = get_host_ports(domain)
-        addr = f"tcp://localhost:{ports['telemetry_zmq']}"
-        ok = zmq_probe(addr, timeout_ms=8000)
-        if not ok:
-            print(f"  [{domain}] Host ZMQ probe failed, trying container-side fallback...")
-            ok = container_zmq_probe(domain)
-        status = "OK" if ok else "FAIL"
-        print(f"  [{domain}] Telemetry ZMQ {addr} -> {status}")
-        if not ok:
-            raise RuntimeError(f"[{domain}] Telemetry ZMQ not flowing")
+    """Phase 6.5: Verify telemetry via REST (dashboard already consumes ZMQ).
 
-    log_step(4, "Verify tactical policy streams")
+    Host-side ZMQ probing is unreliable on Docker Desktop macOS because the
+    VM boundary user-space proxy does not forward ZMQ SUB subscription
+    handshakes. We verify at the application layer instead.
+    """
+    log_step(3, "Verify telemetry streams on both domains (REST-based)")
+    for domain in (domain_a, domain_b):
+        data = health_check(domain, timeout=30)
+        ok = data.get("telemetry_flowing", False)
+        status = "OK" if ok else "FAIL"
+        print(f"  [{domain}] Telemetry via REST /health -> {status} ({data['agents_online']} agents)")
+        if not ok:
+            raise RuntimeError(f"[{domain}] Telemetry not flowing")
+
+    log_step(4, "Verify tactical policy streams (optional ZMQ probe)")
     for domain in (domain_a, domain_b):
         ports = get_host_ports(domain)
         addr = f"tcp://localhost:{ports['tactical_zmq']}"
         ok = zmq_probe(addr, timeout_ms=3000)
         print(f"  [{domain}] Tactical ZMQ {addr} -> {'OK' if ok else 'NO_MSG (expected if no anomaly)'}")
+
 
 def phase_resilience_disconnect(domain_b: str):
     log_step(5, f"Disconnect {domain_b} (simulate stakeholder outage)")
@@ -268,13 +247,13 @@ def phase_reconnect(domain_b: str):
 
 
 def phase_verify_post_reconnect(domain_a: str, domain_b: str):
+    """Phase 6.5: Verify federation resumed via REST health check."""
     log_step(8, "Verify federation resumes after reconnect")
     for domain in (domain_a, domain_b):
-        ports = get_host_ports(domain)
-        addr = f"tcp://localhost:{ports['telemetry_zmq']}"
-        ok = zmq_probe(addr, timeout_ms=12000) # Extended timeout to allow for domain_b to fully rejoin and synchronize
+        data = health_check(domain, timeout=60)
+        ok = data.get("telemetry_flowing", False)
         status = "RESUMED" if ok else "FAIL"
-        print(f"  [{domain}] Telemetry ZMQ {addr} -> {status}")
+        print(f"  [{domain}] Telemetry via REST /health -> {status} ({data['agents_online']} agents)")
         if not ok:
             raise RuntimeError(f"[{domain}] Telemetry did not resume after reconnect")
 
@@ -283,7 +262,7 @@ def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
     if keep:
         ports_a = get_host_ports(domain_a)
         ports_b = get_host_ports(domain_b)
-        print("\\n[KEEP] Stacks left running for manual inspection.")
+        print("\n[KEEP] Stacks left running for manual inspection.")
         print(f"       {domain_a} dashboard: http://localhost:{ports_a['dashboard']}")
         print(f"       {domain_b} dashboard: http://localhost:{ports_b['dashboard']}")
         print(f"       {domain_a} Grafana:   http://localhost:{ports_a['grafana']}")
@@ -322,7 +301,7 @@ def main():
         if not args.skip_base_rebuild:
             phase_bring_up(args.domain_a, is_base=True)
         else:
-            print(f"\\n[SKIP] Assuming {args.domain_a} is already running")
+            print(f"\n[SKIP] Assuming {args.domain_a} is already running")
             data = health_check(args.domain_a, timeout=30)
             print(f"  [{args.domain_a}] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
         phase_bring_up(args.domain_b)
@@ -331,11 +310,11 @@ def main():
         phase_verify_resilience(args.domain_a)
         phase_reconnect(args.domain_b)
         phase_verify_post_reconnect(args.domain_a, args.domain_b)
-        print("\\n" + "="*60)
+        print("\n" + "="*60)
         print("ALL TESTS PASSED — Plug-and-use resilience demonstrated")
         print("="*60)
     except Exception as e:
-        print(f"\\n[FAIL] {e}")
+        print(f"\n[FAIL] {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

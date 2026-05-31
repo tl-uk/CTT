@@ -135,9 +135,8 @@ def health_check(domain: str, timeout: int = 120) -> dict:
 def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 8000) -> bool:
     """Try to receive at least one message from a ZMQ PUB socket.
     
-    Includes slow-joiner guard: sleeps 2s after connect to allow
-    SUB->PUB subscription handshake to complete before receiving.
-    Retries once on timeout for Docker Desktop VM resilience.
+    Phase 6.5: Docker Desktop macOS host-side ZMQ SUB often fails through
+    the VM boundary. Falls back to container-side probe.
     """
     ctx = zmq.Context()
     sub = ctx.socket(zmq.SUB)
@@ -146,26 +145,51 @@ def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 8000) -> bool:
     sub.setsockopt_string(zmq.SUBSCRIBE, topic)
     try:
         sub.connect(addr)
-        # Phase 6.5: Extended slow-joiner guard for Docker Desktop macOS
-        time.sleep(2.0)
-        try:
-            msg = sub.recv()
-            return True
-        except zmq.error.Again:
-            # Retry once — sometimes the first handshake packet is dropped
-            # across the Docker Desktop VM boundary
-            time.sleep(1.0)
-            try:
-                msg = sub.recv()
-                return True
-            except zmq.error.Again:
-                return False
+        time.sleep(0.5)
+        msg = sub.recv()
+        return True
+    except zmq.error.Again:
+        return False
     except Exception as e:
-        print(f"  [ZMQ] Error probing {addr}: {e}")
+        print(f"  [ZMQ] Host probe error for {addr}: {e}")
         return False
     finally:
         sub.close()
         ctx.term()
+
+
+def container_zmq_probe(domain: str, timeout_ms: int = 5000) -> bool:
+    """Run ZMQ SUB probe from inside the dashboard container.
+    
+    Docker Desktop on macOS cannot reliably forward ZMQ PUB/SUB across
+    the VM boundary. Probing from inside the container network works.
+    """
+    container = "ctt-dashboard" if domain == "domain-dft" else f"ctt-dashboard-{domain}"
+    script = f"""
+            import zmq, time, sys
+            ctx = zmq.Context()
+            sub = ctx.socket(zmq.SUB)
+            sub.connect('tcp://engine:5555')
+            sub.subscribe('')
+            sub.set(zmq.RCVTIMEO, {timeout_ms})
+            time.sleep(0.5)
+            try:
+                msg = sub.recv()
+                print('ZMQ_OK', len(msg))
+                sys.exit(0)
+            except zmq.error.Again:
+                print('ZMQ_TIMEOUT')
+                sys.exit(1)
+            """
+    result = subprocess.run(
+        ["docker", "exec", container, "python3", "-c", script],
+        capture_output=True, text=True, timeout=15
+    )
+    ok = "ZMQ_OK" in result.stdout
+    if not ok:
+        print(f"    [container probe] stdout: {result.stdout.strip()}")
+        print(f"    [container probe] stderr: {result.stderr.strip()[:200]}")
+    return ok
 
 
 def log_step(step: int, desc: str):
@@ -207,6 +231,9 @@ def phase_verify_federation(domain_a: str, domain_b: str):
         ports = get_host_ports(domain)
         addr = f"tcp://localhost:{ports['telemetry_zmq']}"
         ok = zmq_probe(addr, timeout_ms=8000)
+        if not ok:
+            print(f"  [{domain}] Host ZMQ probe failed, trying container-side fallback...")
+            ok = container_zmq_probe(domain)
         status = "OK" if ok else "FAIL"
         print(f"  [{domain}] Telemetry ZMQ {addr} -> {status}")
         if not ok:
@@ -218,7 +245,6 @@ def phase_verify_federation(domain_a: str, domain_b: str):
         addr = f"tcp://localhost:{ports['tactical_zmq']}"
         ok = zmq_probe(addr, timeout_ms=3000)
         print(f"  [{domain}] Tactical ZMQ {addr} -> {'OK' if ok else 'NO_MSG (expected if no anomaly)'}")
-
 
 def phase_resilience_disconnect(domain_b: str):
     log_step(5, f"Disconnect {domain_b} (simulate stakeholder outage)")

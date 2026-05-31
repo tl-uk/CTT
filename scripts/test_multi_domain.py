@@ -1,3 +1,6 @@
+# =============================================================================
+# Updated test_multi_domain.py — ZMQ probe with slow-joiner guard
+# =============================================================================
 #!/usr/bin/env python3
 """
 scripts/test_multi_domain.py
@@ -51,7 +54,7 @@ def get_compose_path(domain: str) -> Path:
 
 def get_host_ports(domain: str) -> dict:
     """Return HOST (external) port numbers for probing from the Docker host.
-
+    
     Container ports remain at base values; only host-side mappings shift.
     """
     # Try to read offset from domains.yaml
@@ -62,7 +65,7 @@ def get_host_ports(domain: str) -> dict:
             import re
             # Find port_offset under this domain block
             domain_short = domain.replace("domain-", "")
-            pattern = rf"{re.escape(domain)}:\s*\n(?:\s+.*\n)*?\s+port_offset:\s*(\d+)"
+            pattern = rf"{re.escape(domain)}:\\s*\\n(?:\\s+.*\\n)*?\\s+port_offset:\\s*(\\d+)"
             match = re.search(pattern, text)
             if match:
                 offset = int(match.group(1))
@@ -129,8 +132,13 @@ def health_check(domain: str, timeout: int = 120) -> dict:
     raise RuntimeError(f"[{domain}] Health check failed after {timeout}s")
 
 
-def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 3000) -> bool:
-    """Try to receive at least one message from a ZMQ PUB socket."""
+def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 8000) -> bool:
+    """Try to receive at least one message from a ZMQ PUB socket.
+    
+    Includes slow-joiner guard: sleeps 2s after connect to allow
+    SUB->PUB subscription handshake to complete before receiving.
+    Retries once on timeout for Docker Desktop VM resilience.
+    """
     ctx = zmq.Context()
     sub = ctx.socket(zmq.SUB)
     sub.setsockopt(zmq.RCVTIMEO, timeout_ms)
@@ -138,10 +146,20 @@ def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 3000) -> bool:
     sub.setsockopt_string(zmq.SUBSCRIBE, topic)
     try:
         sub.connect(addr)
-        msg = sub.recv()
-        return True
-    except zmq.error.Again:
-        return False
+        # Phase 6.5: Extended slow-joiner guard for Docker Desktop macOS
+        time.sleep(2.0)
+        try:
+            msg = sub.recv()
+            return True
+        except zmq.error.Again:
+            # Retry once — sometimes the first handshake packet is dropped
+            # across the Docker Desktop VM boundary
+            time.sleep(1.0)
+            try:
+                msg = sub.recv()
+                return True
+            except zmq.error.Again:
+                return False
     except Exception as e:
         print(f"  [ZMQ] Error probing {addr}: {e}")
         return False
@@ -151,7 +169,7 @@ def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 3000) -> bool:
 
 
 def log_step(step: int, desc: str):
-    print(f"\n{'='*60}")
+    print(f"\\n{'='*60}")
     print(f"STEP {step}: {desc}")
     print(f"{'='*60}")
 
@@ -188,7 +206,7 @@ def phase_verify_federation(domain_a: str, domain_b: str):
     for domain in (domain_a, domain_b):
         ports = get_host_ports(domain)
         addr = f"tcp://localhost:{ports['telemetry_zmq']}"
-        ok = zmq_probe(addr, timeout_ms=5000)
+        ok = zmq_probe(addr, timeout_ms=8000)
         status = "OK" if ok else "FAIL"
         print(f"  [{domain}] Telemetry ZMQ {addr} -> {status}")
         if not ok:
@@ -198,7 +216,7 @@ def phase_verify_federation(domain_a: str, domain_b: str):
     for domain in (domain_a, domain_b):
         ports = get_host_ports(domain)
         addr = f"tcp://localhost:{ports['tactical_zmq']}"
-        ok = zmq_probe(addr, timeout_ms=2000)
+        ok = zmq_probe(addr, timeout_ms=3000)
         print(f"  [{domain}] Tactical ZMQ {addr} -> {'OK' if ok else 'NO_MSG (expected if no anomaly)'}")
 
 
@@ -228,7 +246,7 @@ def phase_verify_post_reconnect(domain_a: str, domain_b: str):
     for domain in (domain_a, domain_b):
         ports = get_host_ports(domain)
         addr = f"tcp://localhost:{ports['telemetry_zmq']}"
-        ok = zmq_probe(addr, timeout_ms=8000)
+        ok = zmq_probe(addr, timeout_ms=10000)
         status = "RESUMED" if ok else "FAIL"
         print(f"  [{domain}] Telemetry ZMQ {addr} -> {status}")
         if not ok:
@@ -239,7 +257,7 @@ def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
     if keep:
         ports_a = get_host_ports(domain_a)
         ports_b = get_host_ports(domain_b)
-        print("\n[KEEP] Stacks left running for manual inspection.")
+        print("\\n[KEEP] Stacks left running for manual inspection.")
         print(f"       {domain_a} dashboard: http://localhost:{ports_a['dashboard']}")
         print(f"       {domain_b} dashboard: http://localhost:{ports_b['dashboard']}")
         print(f"       {domain_a} Grafana:   http://localhost:{ports_a['grafana']}")
@@ -278,7 +296,7 @@ def main():
         if not args.skip_base_rebuild:
             phase_bring_up(args.domain_a, is_base=True)
         else:
-            print(f"\n[SKIP] Assuming {args.domain_a} is already running")
+            print(f"\\n[SKIP] Assuming {args.domain_a} is already running")
             data = health_check(args.domain_a, timeout=30)
             print(f"  [{args.domain_a}] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
         phase_bring_up(args.domain_b)
@@ -287,11 +305,11 @@ def main():
         phase_verify_resilience(args.domain_a)
         phase_reconnect(args.domain_b)
         phase_verify_post_reconnect(args.domain_a, args.domain_b)
-        print("\n" + "="*60)
+        print("\\n" + "="*60)
         print("ALL TESTS PASSED — Plug-and-use resilience demonstrated")
         print("="*60)
     except Exception as e:
-        print(f"\n[FAIL] {e}")
+        print(f"\\n[FAIL] {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

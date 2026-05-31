@@ -185,21 +185,18 @@ def generate_domain(domain: str):
     print(f"[GEN] OK: {compose_path}")
 
 
+# In phase_bring_up (non-base path):
 def phase_bring_up(domain: str, is_base: bool = False):
     log_step(1 if is_base else 2, f"Bring up {domain}")
     if is_base:
         compose = COMPOSE_BASE
-        # Ensure base is down first for clean state
         run(["docker-compose", "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
-        run(["docker", "builder", "prune", "-af"], check=False)
     else:
         compose = get_compose_path(domain)
-        run(["docker-compose", "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
-
-    run(["docker-compose", "-f", str(compose), "up", "--build", "-d"])
-    data = health_check(domain)
-    print(f"  [{domain}] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
-
+        project_name = domain.replace("domain-", "ctt-")
+        # CRITICAL: Use -p to isolate project, preventing base container destruction
+        run(["docker-compose", "-p", project_name, "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
+        run(["docker-compose", "-p", project_name, "-f", str(compose), "up", "--build", "-d"])
 
 def phase_verify_federation(domain_a: str, domain_b: str):
     """Phase 6.5: Verify telemetry via REST (dashboard already consumes ZMQ).
@@ -228,7 +225,8 @@ def phase_verify_federation(domain_a: str, domain_b: str):
 def phase_resilience_disconnect(domain_b: str):
     log_step(5, f"Disconnect {domain_b} (simulate stakeholder outage)")
     compose = get_compose_path(domain_b)
-    run(["docker-compose", "-f", str(compose), "down"])
+    project_name = domain_b.replace("domain-", "ctt-")
+    run(["docker-compose", "-p", project_name, "-f", str(compose), "down"])
     time.sleep(3)
 
 
@@ -241,10 +239,10 @@ def phase_verify_resilience(domain_a: str):
 def phase_reconnect(domain_b: str):
     log_step(7, f"Reconnect {domain_b} (simulate recovery)")
     compose = get_compose_path(domain_b)
-    run(["docker-compose", "-f", str(compose), "up", "-d"])
+    project_name = domain_b.replace("domain-", "ctt-")
+    run(["docker-compose", "-p", project_name, "-f", str(compose), "up", "-d"])
     data = health_check(domain_b)
     print(f"  [{domain_b}] Recovered: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
-
 
 def phase_verify_post_reconnect(domain_a: str, domain_b: str):
     """Phase 6.5: Verify federation resumed via REST health check."""
@@ -270,10 +268,10 @@ def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
         return
 
     log_step(9, "Cleanup: tear down both domains")
-    run(["docker-compose", "-f", str(get_compose_path(domain_b)), "down", "--volumes", "--remove-orphans"], check=False)
+    run(["docker-compose", "-p", project_name_b, "-f", str(get_compose_path(domain_b)), "down", "--volumes", "--remove-orphans"], check=False)
     if domain_a != "domain-dft":
-        run(["docker-compose", "-f", str(get_compose_path(domain_a)), "down", "--volumes", "--remove-orphans"], check=False)
-    run(["docker-compose", "-f", str(COMPOSE_BASE), "down", "--volumes", "--remove-orphans"], check=False)
+        project_name_a = domain_a.replace("domain-", "ctt-")
+        run(["docker-compose", "-p", project_name_a, "-f", str(get_compose_path(domain_a)), "down", "--volumes", "--remove-orphans"], check=False)
     print("[OK] All stacks torn down")
 
 

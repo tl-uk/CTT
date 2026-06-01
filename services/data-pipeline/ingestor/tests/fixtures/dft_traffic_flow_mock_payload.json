@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "schema_version": "ctt-belief-1.0",
+    "domain_id": "domain-dft",
+    "corridor_id": "a20_charging_corridor",
+    "timestamp": "2026-06-01T14:30:00+00:00",
+    "source_host": "uk-southeast",
+    "ttl_seconds": 300
+  },
+  "payload": {
+    "belief_type": "telemetry",
+    "observations": [
+      {
+        "ctt:corridor_id": "a20_charging_corridor",
+        "ctt:agent_count": 247,
+        "ctt:speed_mps": 18.5,
+        "ctt:observation_time": "2026-06-01T14:30:00+00:00",
+        "ctt:mode": "ROAD_MOTORIZED",
+        "ctt:baseline_co2_g_km": 850.0,
+        "ctt:powertrain_mix": {
+          "ICE_DIESEL": 0.65,
+          "BEV_ELECTRIC": 0.25,
+          "HYBRID": 0.10
+        }
+      },
+      {
+        "ctt:corridor_id": "m20_corridor",
+        "ctt:agent_count": 1843,
+        "ctt:speed_mps": 31.2,
+        "ctt:observation_time": "2026-06-01T14:30:00+00:00",
+        "ctt:mode": "ROAD_MOTORIZED",
+        "ctt:baseline_co2_g_km": 900.0,
+        "ctt:powertrain_mix": {
+          "ICE_DIESEL": 0.78,
+          "BEV_ELECTRIC": 0.15,
+          "HYBRID": 0.07
+        }
+      }
+    ]
+  },
+  "provenance": {
+    "upstream_domains": [],
+    "confidence": 0.95,
+    "model_version": "dft-traffic-api-v1"
+  }
+}

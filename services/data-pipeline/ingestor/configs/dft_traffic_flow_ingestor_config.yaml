@@ -1,0 +1,98 @@
+# services/data-pipeline/ingestor/configs/dft_traffic_flow.yaml
+# CTT Ingestor Configuration — DfT Traffic Flow API
+# Demonstrates how raw API data is transformed into CTT Kafka topics
+# using the belief envelope schema for cross-domain federation.
+#
+# Usage: python -m ingestor.main --config configs/dft_traffic_flow.yaml
+
+source:
+  id: dft_traffic_flow_api
+  description: "Department for Transport — national traffic flow and speed data"
+  protocol: rest
+  endpoint: https://api.dft.gov.uk/v1/traffic-flow
+  auth:
+    type: api_key
+    header: X-Api-Key
+    env_var: DFT_API_KEY
+  poll_interval_sec: 300
+  timeout_sec: 30
+  retry:
+    max_attempts: 3
+    backoff_sec: [1, 2, 4]
+
+transform:
+  # Field mapping: raw API -> CTT canonical
+  - from: "site_id"
+    to: "ctt:corridor_id"
+    type: string
+    map:
+      "M20_J11": "m20_corridor"
+      "A20_DOVER": "a20_charging_corridor"
+      "A2_FOLKESTONE": "pod_hinterland_corridor"
+      "M6_J19": "m6_corridor"
+
+  - from: "vehicle_count"
+    to: "ctt:agent_count"
+    type: int
+    validate:
+      min: 0
+      max: 10000
+
+  - from: "avg_speed_mph"
+    to: "ctt:speed_mps"
+    type: float
+    convert: "mph_to_mps"  # multiply by 0.44704
+    validate:
+      min: 0.0
+      max: 70.0
+
+  - from: "timestamp"
+    to: "ctt:observation_time"
+    type: iso8601
+
+  - from: "road_type"
+    to: "ctt:mode"
+    type: string
+    map:
+      "motorway": "ROAD_MOTORIZED"
+      "a_road": "ROAD_MOTORIZED"
+      "rail": "RAIL"
+
+  - from: "emission_factor_g_km"
+    to: "ctt:baseline_co2_g_km"
+    type: float
+    validate:
+      min: 0.0
+      max: 2000.0
+
+filter:
+  # Only include observations from CTT-monitored corridors
+  - where: "ctt:corridor_id in ['m20_corridor', 'a20_charging_corridor', 'pod_hinterland_corridor']"
+    action: include
+
+  # Exclude stale data (> 1 hour old)
+  - where: "age(ctt:observation_time) > 3600"
+    action: exclude
+
+enrich:
+  # Add CTT metadata for cross-domain federation
+  - add: "ctt:domain_id"
+    value: "domain-dft"
+  - add: "ctt:source_host"
+    value: "uk-southeast"
+  - add: "ctt:schema_version"
+    value: "ctt-belief-1.0"
+
+output:
+  topic: ctt.telemetry.raw
+  format: json
+  envelope: ctt-belief-1.0
+  compression: gzip
+  batch_size: 100
+  flush_interval_sec: 10
+
+# Quality of Service
+qos:
+  at_least_once: true
+  deduplication_key: "ctt:corridor_id:ctt:observation_time"
+  dead_letter_topic: ctt.telemetry.dlq

@@ -1,0 +1,11 @@
+# services/config/self_descriptions_registry.yaml
+# Index of all Gaia-X self-descriptions in the federation
+participants:
+  dhl-express-uk-eu:
+    path: "../l6-gaiax/self-descriptions/gaiax_self_description_dhl_express.json"
+    domain_id: domain-dhl
+    corridors: [m20_corridor, a20_charging_corridor, pod_hinterland_corridor]
+  network-rail-freight:
+    path: "../l6-gaiax/self-descriptions/gaiax_self_description_network_rail.json"
+    domain_id: domain-network-rail
+    corridors: [national_rail, m20_corridor]

@@ -1,0 +1,186 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CTT Cross-Domain Belief Envelope",
+  "description": "Minimal shared schema for NHS/BEIS/Met Office/DfT federation without schema lock-in. Each domain publishes beliefs scoped to shared spatial corridors.",
+  "version": "ctt-belief-1.0",
+  "type": "object",
+  "required": ["meta", "payload"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["schema_version", "domain_id", "corridor_id", "timestamp", "source_host"],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "ctt-belief-1.0",
+          "description": "Immutable schema version for backward compatibility"
+        },
+        "domain_id": {
+          "type": "string",
+          "enum": ["domain-dft", "domain-dhl", "domain-pod", "domain-nhs", "domain-beis", "domain-met-office", "domain-network-rail", "domain-tesco"],
+          "description": "Originating data-sovereignty boundary"
+        },
+        "corridor_id": {
+          "type": "string",
+          "examples": ["a20_charging_corridor", "pod_hinterland_corridor", "m20_corridor", "national_rail", "pod_terminal"],
+          "description": "Spatial scope identifier. Policies only affect agents in this corridor."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "UTC ISO-8601 timestamp of belief generation"
+        },
+        "source_host": {
+          "type": "string",
+          "description": "Region or hostname for traceability"
+        },
+        "ttl_seconds": {
+          "type": "integer",
+          "default": 300,
+          "description": "Time-to-live. Receivers MUST discard beliefs older than TTL."
+        }
+      }
+    },
+    "payload": {
+      "type": "object",
+      "description": "Domain-specific payload. Schema is NOT enforced — domains evolve independently.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HealthBelief"
+        },
+        {
+          "$ref": "#/definitions/EconomicBelief"
+        },
+        {
+          "$ref": "#/definitions/ClimateBelief"
+        },
+        {
+          "$ref": "#/definitions/StructuralPolicy"
+        },
+        {
+          "$ref": "#/definitions/TerminalBelief"
+        }
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "upstream_domains": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Chain of domain IDs that processed this belief before emission"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Model confidence (0.0 = speculative, 1.0 = observed)"
+        },
+        "model_version": {
+          "type": "string",
+          "description": "CTT phase or model version that generated this belief"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "HealthBelief": {
+      "type": "object",
+      "title": "NHS Domain Belief",
+      "required": ["belief_type", "health_outcome"],
+      "properties": {
+        "belief_type": {"const": "health_belief"},
+        "health_outcome": {
+          "type": "object",
+          "properties": {
+            "qaly_delta": {"type": "number", "description": "Quality-Adjusted Life Years gained/lost"},
+            "respiratory_cases": {"type": "integer", "description": "Predicted additional asthma/COPD cases"},
+            "exposed_population": {"type": "integer", "description": "Population in corridor exposed to threshold exceedance"},
+            "imd_quintile": {"type": "integer", "minimum": 1, "maximum": 5, "description": "Index of Multiple Deprivation quintile most affected"}
+          }
+        },
+        "trigger": {
+          "type": "object",
+          "properties": {
+            "metric": {"type": "string", "examples": ["cumulative_nox_kg", "current_pm25_g_km"]},
+            "threshold": {"type": "number"},
+            "operator": {"enum": [">", ">=", "<", "<="]}
+          }
+        }
+      }
+    },
+    "EconomicBelief": {
+      "type": "object",
+      "title": "BEIS Domain Belief",
+      "required": ["belief_type", "economic_outcome"],
+      "properties": {
+        "belief_type": {"const": "economic_belief"},
+        "economic_outcome": {
+          "type": "object",
+          "properties": {
+            "gdp_elasticity": {"type": "number", "description": "GDP impact elasticity w.r.t. modal shift %"},
+            "jobs_at_risk": {"type": "integer", "description": "FTE jobs structurally dependent on displaced activity"},
+            "jobs_created": {"type": "integer", "description": "FTE jobs in emerging activity (EV maintenance, rail freight)"},
+            "retraining_cost_gbp": {"type": "number", "description": "Estimated public retraining investment"}
+          }
+        },
+        "sector": {"type": "string", "examples": ["short_sea_freight", "customs_parking", "ev_charging"]},
+        "corridor_dependency": {"type": "boolean", "description": "True if outcome is spatially bound to corridor_id"}
+      }
+    },
+    "ClimateBelief": {
+      "type": "object",
+      "title": "Met Office Domain Belief",
+      "required": ["belief_type", "climate_outcome"],
+      "properties": {
+        "belief_type": {"const": "climate_belief"},
+        "climate_outcome": {
+          "type": "object",
+          "properties": {
+            "heat_stress_index": {"type": "number", "description": "Wet Bulb Globe Temperature or equivalent"},
+            "flood_risk_level": {"type": "integer", "minimum": 0, "maximum": 4, "description": "0=None, 1=Low, 2=Medium, 3=High, 4=Severe"},
+            "storm_surge_eta_hours": {"type": "number", "description": "Estimated time to storm surge impact on corridor"},
+            "infrastructure_vulnerability": {"type": "string", "examples": ["road_surface_degradation", "overhead_line_risk", "port_closure"]}
+          }
+        },
+        "forecast_horizon_hours": {"type": "integer", "description": "Prediction validity window"}
+      }
+    },
+    "StructuralPolicy": {
+      "type": "object",
+      "title": "DfT Structural Policy",
+      "required": ["belief_type", "policy"],
+      "properties": {
+        "belief_type": {"const": "structural_policy"},
+        "policy": {
+          "type": "object",
+          "properties": {
+            "policy_type": {"type": "string", "examples": ["pressure_relief", "congestion_charge", "toll_discount"]},
+            "pressure_cap": {"type": "number"},
+            "toll_discount_pct": {"type": "number"},
+            "target_sector": {"type": "string", "examples": ["all_hgv", "road_motorized", "rail_freight"]},
+            "reason": {"type": "string"}
+          }
+        }
+      }
+    },
+    "TerminalBelief": {
+      "type": "object",
+      "title": "Port of Dover Terminal Belief",
+      "required": ["belief_type", "terminal_state"],
+      "properties": {
+        "belief_type": {"const": "terminal_belief"},
+        "terminal_state": {
+          "type": "object",
+          "properties": {
+            "queue_length_hgv": {"type": "integer"},
+            "avg_idling_minutes": {"type": "number"},
+            "customs_lanes_open": {"type": "integer"},
+            "charger_utilisation_pct": {"type": "number"},
+            "terminal_emission_rate_kg_hr": {"type": "number"}
+          }
+        }
+      }
+    }
+  }
+}

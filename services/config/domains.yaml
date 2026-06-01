@@ -76,6 +76,90 @@ domains:
         topic: ctt.policy.structural
         notes: "Emergency vehicle priority routing from DfT"
 
+  domain-pod:
+    description: "Port of Dover — RORO freight decarbonisation and terminal operations"
+    city_id: city-pod
+    region: uk-southeast
+    port_offset: 10
+    network: ctt-pod
+    federation_peers:
+      - target: domain-dft
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5563
+        topic: ctt.policy.structural
+        notes: "DfT national policy for terminal access charging"
+      - target: domain-nhs
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5571
+        topic: ctt.belief.health
+        notes: "Childhood asthma risk from idling emissions at terminal gate"
+      - target: domain-met-office
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5573
+        topic: ctt.belief.climate
+        notes: "Heatwave warnings for queued HGV driver welfare"
+
+  domain-nhs:
+    description: "NHS England — health outcomes from transport decarbonisation"
+    city_id: city-nhs
+    region: uk-london
+    port_offset: 12
+    network: ctt-nhs
+    federation_peers:
+      - target: domain-dft
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5563
+        topic: ctt.policy.structural
+      - target: domain-pod
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5573
+        topic: ctt.telemetry.raw
+        notes: "Observe PoD terminal emissions for respiratory health modelling"
+      - target: domain-beis
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5575
+        topic: ctt.belief.economic
+        notes: "Job displacement health impacts from retraining programmes"
+
+  domain-beis:
+    description: "BEIS — economic externalities from modal shift and employment elasticity"
+    city_id: city-beis
+    region: uk-london
+    port_offset: 14
+    network: ctt-beis
+    federation_peers:
+      - target: domain-dft
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5563
+        topic: ctt.policy.structural
+      - target: domain-pod
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5573
+        topic: ctt.telemetry.raw
+        notes: "Customs parking displacement by EV chargers — short-sea freight job losses"
+      - target: domain-nhs
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5571
+        topic: ctt.belief.health
+        notes: "QALY data for cost-benefit of decarbonisation interventions"
+
+  domain-met-office:
+    description: "Met Office — climate adaptation and extreme weather infrastructure risk"
+    city_id: city-met
+    region: uk-exeter
+    port_offset: 16
+    network: ctt-met
+    federation_peers:
+      - target: domain-dft
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5563
+        topic: ctt.policy.structural
+      - target: domain-pod
+        protocol: zmq_sub
+        address: tcp://host.docker.internal:5573
+        topic: ctt.telemetry.raw
+        notes: "Summer heatwave impacts on queued HGV driver welfare and infrastructure"
+
 # Base ports (domain-dft uses these directly)
 # port_offset shifts ALL ports by this amount:
 #   engine_telemetry: 5555 + offset
@@ -87,3 +171,14 @@ domains:
 #   kafka_broker:     9092 + offset
 #   dashboard_rest:   5001 + offset
 #   grafana:          3000 + offset
+#
+# Phase 7 domain offsets:
+#   domain-dft:        0  (base)
+#   domain-dhl:        2
+#   domain-network-rail: 4
+#   domain-tesco:      6
+#   domain-nhs:        8  → updated to 12 in Phase 7
+#   domain-pod:       10
+#   domain-nhs:       12
+#   domain-beis:      14
+#   domain-met-office: 16

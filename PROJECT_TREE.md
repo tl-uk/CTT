@@ -1,6 +1,6 @@
 # CTT Project Structure
 
-**Generated:** Sat May 30 16:19:58 BST 2026
+**Generated:** Sun May 31 21:59:07 BST 2026
 
 ```
 └── CTT
@@ -15,7 +15,6 @@
     │   ├── docker-compose-redpanda.yml
     │   ├── docker-compose.domain-dhl.yml
     │   ├── docker-compose.yml
-    │   ├── domains.yaml
     │   └── grafana
     │       ├── dashboards
     │       │   └── ctt-dashboard.json
@@ -35,6 +34,7 @@
     │   └── test_sme_feed.py
     └── services
         ├── config
+        │   ├── domains.yaml
         │   ├── ports.py
         │   ├── settings.py
         │   └── validate_ports.py

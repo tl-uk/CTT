@@ -137,4 +137,39 @@ namespace CTT {
         std::string hub_id;        ///< NaPTAN Hub ID
     };
 
+    /** @struct ExternalitiesComponent @brief First-class non-transport effects (CO₂, NOₓ, noise, PM2.5). */
+    struct ExternalitiesComponent {
+        // Baseline emission factors (g/km at reference speed 50 km/h)
+        float baseline_co2_g_km;
+        float baseline_nox_g_km;
+        float baseline_pm25_g_km;
+        float baseline_noise_db;
+
+        // Idling emission rates (g/s when speed ≈ 0) — terminal gates, congestion queues
+        float idling_co2_g_s;
+        float idling_nox_g_s;
+
+        // Current computed rates (updated by ECS system each tick)
+        float current_co2_g_km;
+        float current_nox_g_km;
+        float current_pm25_g_km;
+        float current_noise_db;
+
+        // Accumulated lifetime emissions (kg)
+        float cumulative_co2_kg;
+        float cumulative_nox_kg;
+        float cumulative_pm25_kg;
+    };
+
+    /** @struct SocialImpactComponent @brief Equity, accessibility, and economic dependency. */
+    struct SocialImpactComponent {
+        float accessibility_score;     ///< 0.0–1.0 (higher = more accessible to vulnerable groups)
+        int jobs_dependent;            ///< FTE jobs structurally dependent on this agent/route
+        float deprivation_index;       ///< Index of Multiple Deprivation (IMD) for current location (0–100)
+        float equity_exposure;         ///< 0.0–1.0 policy-change exposure for deprived populations
+        bool serves_deprived_ward;     ///< True if current corridor/terminal serves IMD Q1–Q2 area
+        std::string corridor_id;         ///< Spatial scope identifier (e.g., "pod_hinterland", "a20_charging")
+    };
+
+
 } // namespace CTT

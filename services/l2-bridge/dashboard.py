@@ -45,6 +45,21 @@ class AgentState:
     adversarial_pressure: float
     is_decarbonized: bool
     timestamp: float
+    # Phase 7 — Externalities
+    current_co2_g_km: float = 0.0
+    current_nox_g_km: float = 0.0
+    current_pm25_g_km: float = 0.0
+    current_noise_db: float = 0.0
+    cumulative_co2_kg: float = 0.0
+    cumulative_nox_kg: float = 0.0
+    cumulative_pm25_kg: float = 0.0
+    # Phase 7 — Social impact
+    accessibility_score: float = 0.0
+    jobs_dependent: int = 0
+    deprivation_index: float = 0.0
+    equity_exposure: float = 0.0
+    serves_deprived_ward: bool = False
+    corridor_id: str = 
 
 
 @dataclass
@@ -119,7 +134,20 @@ class TelemetryCollector:
                             lon=agent.get("lon", 0.0),
                             adversarial_pressure=agent.get("adversarial_pressure", 0.0),
                             is_decarbonized=agent.get("is_decarbonized", False),
-                            timestamp=time.time()
+                            timestamp=time.time(),
+                            current_co2_g_km=agent.get("current_co2_g_km", 0.0),
+                            current_nox_g_km=agent.get("current_nox_g_km", 0.0),
+                            current_pm25_g_km=agent.get("current_pm25_g_km", 0.0),
+                            current_noise_db=agent.get("current_noise_db", 0.0),
+                            cumulative_co2_kg=agent.get("cumulative_co2_kg", 0.0),
+                            cumulative_nox_kg=agent.get("cumulative_nox_kg", 0.0),
+                            cumulative_pm25_kg=agent.get("cumulative_pm25_kg", 0.0),
+                            accessibility_score=agent.get("accessibility_score", 0.0),
+                            jobs_dependent=agent.get("jobs_dependent", 0),
+                            deprivation_index=agent.get("deprivation_index", 0.0),
+                            equity_exposure=agent.get("equity_exposure", 0.0),
+                            serves_deprived_ward=agent.get("serves_deprived_ward", False),
+                            corridor_id=agent.get("corridor_id", "")
                         )
             except zmq.error.Again:
                 continue
@@ -331,6 +359,86 @@ def get_agent_history(agent_name):
     return jsonify({
         "agent": agent_name,
         "history": collector.get_history(agent_name, limit)
+    })
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Externality & Social Impact Aggregation
+# ---------------------------------------------------------------------------
+
+@app.route("/api/v1/externality/summary")
+def externality_summary():
+    """Aggregate emissions across all agents, by corridor and powertrain."""
+    agents = collector.get_latest()
+    summary = {
+        "total_co2_kg": 0.0,
+        "total_nox_kg": 0.0,
+        "total_pm25_kg": 0.0,
+        "avg_noise_db": 0.0,
+        "by_corridor": {},
+        "by_powertrain": {},
+        "deprived_ward_exposure": {
+            "agents_serving": 0,
+            "total_equity_exposure": 0.0,
+            "total_jobs_at_risk": 0
+        }
+    }
+    noise_count = 0
+    for agent in agents:
+        summary["total_co2_kg"] += agent.get("cumulative_co2_kg", 0.0)
+        summary["total_nox_kg"] += agent.get("cumulative_nox_kg", 0.0)
+        summary["total_pm25_kg"] += agent.get("cumulative_pm25_kg", 0.0)
+        n = agent.get("current_noise_db", 0.0)
+        if n > 0:
+            summary["avg_noise_db"] += n
+            noise_count += 1
+
+        corridor = agent.get("corridor_id", "unknown")
+        if corridor not in summary["by_corridor"]:
+            summary["by_corridor"][corridor] = {
+                "agent_count": 0, "co2_kg": 0.0, "nox_kg": 0.0,
+                "pm25_kg": 0.0, "jobs_dependent": 0
+            }
+        summary["by_corridor"][corridor]["agent_count"] += 1
+        summary["by_corridor"][corridor]["co2_kg"] += agent.get("cumulative_co2_kg", 0.0)
+        summary["by_corridor"][corridor]["nox_kg"] += agent.get("cumulative_nox_kg", 0.0)
+        summary["by_corridor"][corridor]["pm25_kg"] += agent.get("cumulative_pm25_kg", 0.0)
+        summary["by_corridor"][corridor]["jobs_dependent"] += agent.get("jobs_dependent", 0)
+
+        pt = agent.get("powertrain", 0)
+        pt_name = {0: "ICE_DIESEL", 1: "ICE_PETROL", 2: "BEV_ELECTRIC",
+                   3: "FCEV_HYDROGEN", 4: "HYBRID"}.get(pt, "UNKNOWN")
+        if pt_name not in summary["by_powertrain"]:
+            summary["by_powertrain"][pt_name] = {"agent_count": 0, "co2_kg": 0.0}
+        summary["by_powertrain"][pt_name]["agent_count"] += 1
+        summary["by_powertrain"][pt_name]["co2_kg"] += agent.get("cumulative_co2_kg", 0.0)
+
+        if agent.get("serves_deprived_ward", False):
+            summary["deprived_ward_exposure"]["agents_serving"] += 1
+            summary["deprived_ward_exposure"]["total_equity_exposure"] += agent.get("equity_exposure", 0.0)
+            summary["deprived_ward_exposure"]["total_jobs_at_risk"] += agent.get("jobs_dependent", 0)
+
+    if noise_count > 0:
+        summary["avg_noise_db"] /= noise_count
+
+    return jsonify(summary)
+
+
+@app.route("/api/v1/social-impact/corridor/<corridor_id>")
+def corridor_social_impact(corridor_id):
+    """Social impact profile for a specific corridor (e.g., a20_charging_corridor)."""
+    agents = collector.get_latest()
+    corridor_agents = [a for a in agents if a.get("corridor_id") == corridor_id]
+    if not corridor_agents:
+        return jsonify({"error": "Corridor not found or no agents assigned"}), 404
+
+    return jsonify({
+        "corridor_id": corridor_id,
+        "agent_count": len(corridor_agents),
+        "avg_accessibility": sum(a.get("accessibility_score", 0) for a in corridor_agents) / len(corridor_agents),
+        "total_jobs_dependent": sum(a.get("jobs_dependent", 0) for a in corridor_agents),
+        "avg_deprivation": sum(a.get("deprivation_index", 0) for a in corridor_agents) / len(corridor_agents),
+        "serves_deprived_ward_count": sum(1 for a in corridor_agents if a.get("serves_deprived_ward")),
+        "agents": corridor_agents
     })
 
 

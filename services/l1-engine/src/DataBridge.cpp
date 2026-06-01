@@ -77,14 +77,18 @@ void DataBridge::broadcast_state(flecs::world& world) {
         const TaxonomyComponent, 
         const EnergyComponent, 
         const PositionComponent,
-        const MindsetComponent
+        const MindsetComponent,
+        const ExternalitiesComponent,
+        const SocialImpactComponent
     >();
 
     q.each([&](flecs::entity e, 
                const TaxonomyComponent& tax, 
                const EnergyComponent& energy, 
                const PositionComponent& pos,
-               const MindsetComponent& mindset) {
+               const MindsetComponent& mindset,
+               const ExternalitiesComponent& ext,
+               const SocialImpactComponent& soc) {
 
         float energy_pct = 0.0f;
         if (energy.maxEnergyStorage > 0.0f) {
@@ -99,7 +103,22 @@ void DataBridge::broadcast_state(flecs::world& world) {
             {"lat", pos.latitude},
             {"lon", pos.longitude},
             {"adversarial_pressure", mindset.adversarial_pressure},
-            {"is_decarbonized", mindset.is_decarbonized}
+            {"is_decarbonized", mindset.is_decarbonized},
+            // Phase 7 — Externalities
+            {"current_co2_g_km", ext.current_co2_g_km},
+            {"current_nox_g_km", ext.current_nox_g_km},
+            {"current_pm25_g_km", ext.current_pm25_g_km},
+            {"current_noise_db", ext.current_noise_db},
+            {"cumulative_co2_kg", ext.cumulative_co2_kg},
+            {"cumulative_nox_kg", ext.cumulative_nox_kg},
+            {"cumulative_pm25_kg", ext.cumulative_pm25_kg},
+            // Phase 7 — Social impact
+            {"accessibility_score", soc.accessibility_score},
+            {"jobs_dependent", soc.jobs_dependent},
+            {"deprivation_index", soc.deprivation_index},
+            {"equity_exposure", soc.equity_exposure},
+            {"serves_deprived_ward", soc.serves_deprived_ward},
+            {"corridor_id", soc.corridor_id}
         });
     });
 
@@ -187,14 +206,18 @@ std::string DataBridge::snapshot_world(flecs::world& world) {
         const TaxonomyComponent, 
         const EnergyComponent, 
         const PositionComponent,
-        const MindsetComponent
+        const MindsetComponent,
+        const ExternalitiesComponent,
+        const SocialImpactComponent
     >();
 
     q.each([&](flecs::entity e, 
                const TaxonomyComponent& tax, 
                const EnergyComponent& energy, 
                const PositionComponent& pos,
-               const MindsetComponent& mindset) {
+               const MindsetComponent& mindset,
+               const ExternalitiesComponent& ext,
+               const SocialImpactComponent& soc) {
 
         float energy_pct = 0.0f;
         if (energy.maxEnergyStorage > 0.0f) {
@@ -209,7 +232,22 @@ std::string DataBridge::snapshot_world(flecs::world& world) {
             {"lat", pos.latitude},
             {"lon", pos.longitude},
             {"adversarial_pressure", mindset.adversarial_pressure},
-            {"is_decarbonized", mindset.is_decarbonized}
+            {"is_decarbonized", mindset.is_decarbonized},
+            // Phase 7 — Externalities
+            {"current_co2_g_km", ext.current_co2_g_km},
+            {"current_nox_g_km", ext.current_nox_g_km},
+            {"current_pm25_g_km", ext.current_pm25_g_km},
+            {"current_noise_db", ext.current_noise_db},
+            {"cumulative_co2_kg", ext.cumulative_co2_kg},
+            {"cumulative_nox_kg", ext.cumulative_nox_kg},
+            {"cumulative_pm25_kg", ext.cumulative_pm25_kg},
+            // Phase 7 — Social impact
+            {"accessibility_score", soc.accessibility_score},
+            {"jobs_dependent", soc.jobs_dependent},
+            {"deprivation_index", soc.deprivation_index},
+            {"equity_exposure", soc.equity_exposure},
+            {"serves_deprived_ward", soc.serves_deprived_ward},
+            {"corridor_id", soc.corridor_id}
         });
     });
 

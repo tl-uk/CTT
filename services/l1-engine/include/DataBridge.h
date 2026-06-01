@@ -1,12 +1,13 @@
 // services/l1-engine/include/DataBridge.h
+// Phase 7 — hardened ZMQ bridge with thread-safe telemetry & perturbation queues
 #pragma once
 #include <string>
 #include <vector>
 #include <mutex>
-#include <queue>
 #include <atomic>
-#include <flecs.h>
 #include <zmq.hpp>
+#include "flecs.h"
+#include "AgentComponents.h"
 #include "ctt_messages.pb.h"
 
 namespace CTT {
@@ -17,7 +18,7 @@ namespace CTT {
  */
 struct PerturbationCmd {
     std::string agent_uuid;
-    float pressure_delta;
+    double pressure_delta;
     std::string source;
 };
 
@@ -60,7 +61,6 @@ private:
 class DataBridge {
 public:
     DataBridge(const std::string& pub_address, const std::string& sub_address);
-    ~DataBridge() = default;
 
     // --- Legacy single-threaded API (kept for compatibility) ---
     void broadcast_state(flecs::world& world);
@@ -81,7 +81,7 @@ public:
 
     /** Signal the ZMQ thread to shut down. */
     void stop() { _running = false; }
-    bool running() const { return _running; }
+    bool running() const { return _running.load(); }
 
 private:
     zmq::context_t context;

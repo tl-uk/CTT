@@ -184,10 +184,12 @@ if __name__ == "__main__":
     try:
         bridge.run()
     except KeyboardInterrupt:
-        print("\\n🛑 Federation bridge stopping...")
+        print("
+🛑 Federation bridge stopping...")
         bridge.stop()
     except Exception as e:
         import traceback
-        print(f"\\n💥 Fatal: {e}")
+        print(f"
+💥 Fatal: {e}")
         traceback.print_exc()
         bridge.stop()

@@ -42,7 +42,7 @@ domains:
         topic: ctt.policy.structural
       - target: domain-dhl
         protocol: zmq_sub
-        address: tcp://host.docker.internal:5567
+        address: tcp://host.docker.internal:5565
         topic: ctt.telemetry.raw
         notes: "Monitor DHL freight handoffs at rail terminals"
 
@@ -59,22 +59,9 @@ domains:
         topic: ctt.policy.structural
       - target: domain-dhl
         protocol: zmq_sub
-        address: tcp://host.docker.internal:5567
+        address: tcp://host.docker.internal:5565
         topic: ctt.policy.structural
         notes: "Align with DHL on shared urban depot policies"
-
-  domain-nhs:
-    description: "NHS Logistics — medical supply chain and emergency vehicles"
-    city_id: city-nhs
-    region: uk-london
-    port_offset: 8
-    network: ctt-nhs
-    federation_peers:
-      - target: domain-dft
-        protocol: zmq_sub
-        address: tcp://host.docker.internal:5563
-        topic: ctt.policy.structural
-        notes: "Emergency vehicle priority routing from DfT"
 
   domain-pod:
     description: "Port of Dover — RORO freight decarbonisation and terminal operations"
@@ -88,23 +75,23 @@ domains:
         address: tcp://host.docker.internal:5563
         topic: ctt.policy.structural
         notes: "DfT national policy for terminal access charging"
-      - target: domain-nhs
+      - target: domain-env
         protocol: zmq_sub
-        address: tcp://host.docker.internal:5571
+        address: tcp://host.docker.internal:5575
         topic: ctt.belief.health
         notes: "Childhood asthma risk from idling emissions at terminal gate"
       - target: domain-met-office
         protocol: zmq_sub
-        address: tcp://host.docker.internal:5573
+        address: tcp://host.docker.internal:5579
         topic: ctt.belief.climate
         notes: "Heatwave warnings for queued HGV driver welfare"
 
-  domain-nhs:
-    description: "NHS England — health outcomes from transport decarbonisation"
-    city_id: city-nhs
+  domain-env:
+    description: "Environment Agency — health outcomes, air quality, QALY from transport decarbonisation"
+    city_id: city-env
     region: uk-london
     port_offset: 12
-    network: ctt-nhs
+    network: ctt-env
     federation_peers:
       - target: domain-dft
         protocol: zmq_sub
@@ -117,7 +104,7 @@ domains:
         notes: "Observe PoD terminal emissions for respiratory health modelling"
       - target: domain-beis
         protocol: zmq_sub
-        address: tcp://host.docker.internal:5575
+        address: tcp://host.docker.internal:5577
         topic: ctt.belief.economic
         notes: "Job displacement health impacts from retraining programmes"
 
@@ -137,9 +124,9 @@ domains:
         address: tcp://host.docker.internal:5573
         topic: ctt.telemetry.raw
         notes: "Customs parking displacement by EV chargers — short-sea freight job losses"
-      - target: domain-nhs
+      - target: domain-env
         protocol: zmq_sub
-        address: tcp://host.docker.internal:5571
+        address: tcp://host.docker.internal:5575
         topic: ctt.belief.health
         notes: "QALY data for cost-benefit of decarbonisation interventions"
 
@@ -161,7 +148,7 @@ domains:
         notes: "Summer heatwave impacts on queued HGV driver welfare and infrastructure"
 
 # Base ports (domain-dft uses these directly)
-# port_offset shifts ALL ports by this amount:
+# port_offset shifts ALL host ports by this amount; container ports remain at base.
 #   engine_telemetry: 5555 + offset
 #   fusion_pub:       5556 + offset
 #   harvester_pub:    5560 + offset (internal only)
@@ -173,12 +160,11 @@ domains:
 #   grafana:          3000 + offset
 #
 # Phase 7 domain offsets:
-#   domain-dft:        0  (base)
-#   domain-dhl:        2
-#   domain-network-rail: 4
-#   domain-tesco:      6
-#   domain-nhs:        8  → updated to 12 in Phase 7
-#   domain-pod:       10
-#   domain-nhs:       12
-#   domain-beis:      14
-#   domain-met-office: 16
+#   domain-dft:          0  (base)
+#   domain-dhl:          2
+#   domain-network-rail:   4
+#   domain-tesco:        6
+#   domain-pod:         10
+#   domain-env:         12
+#   domain-beis:        14
+#   domain-met-office:  16

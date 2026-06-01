@@ -1,6 +1,6 @@
 # CTT Project Structure
 
-**Generated:** Sun May 31 21:59:07 BST 2026
+**Generated:** Mon Jun  1 22:56:50 BST 2026
 
 ```
 └── CTT
@@ -34,8 +34,10 @@
     │   └── test_sme_feed.py
     └── services
         ├── config
+        │   ├── belief_envelope_schema.json
         │   ├── domains.yaml
         │   ├── ports.py
+        │   ├── self_descriptions_registry.yaml
         │   ├── settings.py
         │   └── validate_ports.py
         ├── data-pipeline
@@ -46,11 +48,16 @@
         │   │   └── fusion_engine.py
         │   ├── ingestor
         │   │   ├── Dockerfile
+        │   │   ├── configs
+        │   │   │   └── dft_traffic_flow_ingestor_config.yaml
         │   │   ├── gtfs_harvester.py
         │   │   ├── gtfs_loader.py
         │   │   ├── harvester.py
         │   │   ├── harvester_mock.py
-        │   │   └── main.py
+        │   │   ├── main.py
+        │   │   └── tests
+        │   │       └── fixtures
+        │   │           └── dft_traffic_flow_mock_payload.json
         │   └── interpreter
         │       ├── Dockerfile
         │       └── semantic_agent.py
@@ -91,5 +98,7 @@
             ├── edc_gateway.py
             ├── policy_enforcer.py
             ├── requirements.txt
+            ├── self-descriptions
+            │   └── gaiax_self_description_dhl_express.json
             └── self_description.json
 ```

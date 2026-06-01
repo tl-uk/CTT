@@ -59,7 +59,7 @@ class AgentState:
     deprivation_index: float = 0.0
     equity_exposure: float = 0.0
     serves_deprived_ward: bool = False
-    corridor_id: str = 
+    corridor_id: str = ""
 
 
 @dataclass

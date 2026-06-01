@@ -1,0 +1,338 @@
+# services/l6-gaiax/edc-deployment.yaml
+# Eclipse Dataspace Connector (EDC) — Kubernetes reference architecture
+# Phase 8: Trust overlay sidecar for Gaia-X contract negotiation
+#
+# Usage: kubectl apply -f services/l6-gaiax/edc-deployment.yaml
+# Prerequisites: cert-manager, ingress-nginx, external-secrets-operator
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ctt-gaiax
+  labels:
+    istio-injection: enabled
+    ctt.layer: "l6-trust"
+
+---
+# ---------------------------------------------------------------------------
+# ConfigMap: EDC runtime configuration
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edc-config
+  namespace: ctt-gaiax
+data:
+  edc.properties: |
+    # Dataspace identity
+    edc.dsp.id=did:web:dhl-express.uk-eu.ctt.dhl.com
+    edc.vault.hashicorp.url=http://vault.ctt-gaiax.svc:8200
+    edc.vault.hashicorp.token=${VAULT_TOKEN}
+
+    # Contract negotiation
+    edc.negotiation.consumer.send.retry.limit=5
+    edc.negotiation.provider.send.retry.limit=5
+
+    # Transfer
+    edc.transfer.proxy.token.signer.privatekey.alias=token-signer
+    edc.transfer.proxy.token.verifier.publickey.alias=token-verifier
+
+    # ODRL enforcement
+    edc.policy.validation.enabled=true
+    edc.policy.monitor.period=60s
+
+    # CTT integration — output writes to same ZMQ/Kafka topics as domestic
+    edt.ctt.kafka.bootstrap.servers=kafka.ctt.svc:9092
+    edt.ctt.telemetry.topic=ctt.telemetry.raw
+    edt.ctt.policy.topic=ctt.policy.structural
+
+---
+# ---------------------------------------------------------------------------
+# Secret: Gaia-X DID private key (managed by external-secrets in production)
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gaiax-did-key
+  namespace: ctt-gaiax
+type: Opaque
+stringData:
+  private-key.pem: |
+    -----BEGIN PRIVATE KEY-----
+    MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC...
+    -----END PRIVATE KEY-----
+  self-description.json: |
+    { "ref": "services/l6-gaiax/self_description_dhl_express.json" }
+
+---
+# ---------------------------------------------------------------------------
+# Deployment: EDC Control Plane + Data Plane sidecars
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edc-gateway
+  namespace: ctt-gaiax
+  labels:
+    app: edc-gateway
+    version: v1
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: edc-gateway
+  template:
+    metadata:
+      labels:
+        app: edc-gateway
+        version: v1
+    spec:
+      serviceAccountName: edc-gateway
+      containers:
+        # ---- Control Plane: contract negotiation, policy evaluation ----
+        - name: edc-control-plane
+          image: ghcr.io/eclipse-edc/control-plane:0.5.1
+          ports:
+            - containerPort: 8181
+              name: management
+            - containerPort: 8282
+              name: protocol
+          env:
+            - name: EDC_API_AUTH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: edc-api-auth
+                  key: key
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vault-token
+                  key: token
+          volumeMounts:
+            - name: edc-config-vol
+              mountPath: /app/config
+            - name: did-key-vol
+              mountPath: /app/did
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /api/check/liveness
+              port: 8181
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/check/readiness
+              port: 8181
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+
+        # ---- Data Plane: data transfer proxy, ODRL enforcement ----
+        - name: edc-data-plane
+          image: ghcr.io/eclipse-edc/data-plane:0.5.1
+          ports:
+            - containerPort: 8383
+              name: public
+          env:
+            - name: EDC_DATAPLANE_TOKEN_VALIDATION_ENDPOINT
+              value: "http://localhost:8181/api/token/validation"
+          volumeMounts:
+            - name: edc-config-vol
+              mountPath: /app/config
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "125m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+        # ---- CTT Policy Enforcer sidecar: validates ODRL before Kafka write ----
+        - name: ctt-policy-enforcer
+          image: ctt-registry/ctt-policy-enforcer:phase8
+          command: ["python", "policy_enforcer.py"]
+          env:
+            - name: CTT_EDC_MODE
+              value: "sidecar"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka.ctt.svc:9092"
+            - name: ODRL_POLICY_PATH
+              value: "/app/did/self-description.json"
+          volumeMounts:
+            - name: did-key-vol
+              mountPath: /app/did
+              readOnly: true
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+
+      volumes:
+        - name: edc-config-vol
+          configMap:
+            name: edc-config
+        - name: did-key-vol
+          secret:
+            secretName: gaiax-did-key
+            items:
+              - key: private-key.pem
+                path: private-key.pem
+              - key: self-description.json
+                path: self-description.json
+
+---
+# ---------------------------------------------------------------------------
+# Service: EDC gateway exposure
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: edc-gateway
+  namespace: ctt-gaiax
+spec:
+  selector:
+    app: edc-gateway
+  ports:
+    - name: management
+      port: 8181
+      targetPort: 8181
+    - name: protocol
+      port: 8282
+      targetPort: 8282
+    - name: public
+      port: 8383
+      targetPort: 8383
+
+---
+# ---------------------------------------------------------------------------
+# Ingress: TLS 1.3 + mTLS for Gaia-X federation peers
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: edc-ingress
+  namespace: ctt-gaiax
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-ssl-protocols: "TLSv1.3"
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+    nginx.ingress.kubernetes.io/auth-tls-secret: "ctt-gaiax/gaiax-ca-cert"
+    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "1"
+    cert-manager.io/cluster-issuer: "letsencrypt-gaiax"
+spec:
+  tls:
+    - hosts:
+        - dhl-express.uk-eu.ctt.dhl.com
+      secretName: dhl-express-tls
+  rules:
+    - host: dhl-express.uk-eu.ctt.dhl.com
+      http:
+        paths:
+          - path: /api/v1/dsp
+            pathType: Prefix
+            backend:
+              service:
+                name: edc-gateway
+                port:
+                  number: 8282
+          - path: /api/v1/data
+            pathType: Prefix
+            backend:
+              service:
+                name: edc-gateway
+                port:
+                  number: 8383
+
+---
+# ---------------------------------------------------------------------------
+# ServiceAccount + RBAC
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: edc-gateway
+  namespace: ctt-gaiax
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: edc-gateway-role
+  namespace: ctt-gaiax
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: edc-gateway-rolebinding
+  namespace: ctt-gaiax
+subjects:
+  - kind: ServiceAccount
+    name: edc-gateway
+    namespace: ctt-gaiax
+roleRef:
+  kind: Role
+  name: edc-gateway-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ---------------------------------------------------------------------------
+# NetworkPolicy: restrict EDC to CTT core only
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: edc-network-policy
+  namespace: ctt-gaiax
+spec:
+  podSelector:
+    matchLabels:
+      app: edc-gateway
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              ctt.layer: l5-macro
+        - namespaceSelector:
+            matchLabels:
+              ctt.layer: l2-bridge
+      ports:
+        - protocol: TCP
+          port: 8282
+        - protocol: TCP
+          port: 8383
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              ctt.layer: l1-engine
+        - namespaceSelector:
+            matchLabels:
+              ctt.layer: l5-macro
+      ports:
+        - protocol: TCP
+          port: 5555
+        - protocol: TCP
+          port: 9092

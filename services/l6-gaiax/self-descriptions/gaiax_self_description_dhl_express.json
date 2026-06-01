@@ -1,108 +1,79 @@
 {
   "@context": [
     "https://www.w3.org/2018/credentials/v1",
-    "https://registry.gaia-x.eu/v2206/api/shape",
-    "https://w3id.org/ctt/gaiax-extension/v1"
+    "https://w3id.org/gaia-x/development"
   ],
-  "type": ["VerifiablePresentation", "gx:SelfDescription"],
-  "id": "did:web:ctt.dhl-express.uk:participants:dhl-uk-eu-freight",
-  "issuer": "did:web:ctt.dhl-express.uk",
-  "issuanceDate": "2026-06-01T00:00:00Z",
+  "type": ["VerifiablePresentation", "GaiaXSelfDescription"],
   "verifiableCredential": [
     {
       "@context": ["https://www.w3.org/2018/credentials/v1"],
-      "type": ["VerifiableCredential", "gx:LegalPerson"],
-      "id": "did:web:ctt.dhl-express.uk:participants:dhl-uk-eu-freight#legal",
-      "issuer": "did:web:ctt.dhl-express.uk",
+      "type": ["VerifiableCredential", "GaiaXLegalPerson"],
+      "id": "did:web:dhl-express.uk-eu.ctt.dhl.com",
+      "issuer": "did:web:dhl-express.uk-eu.ctt.dhl.com",
       "issuanceDate": "2026-06-01T00:00:00Z",
       "credentialSubject": {
-        "id": "did:web:ctt.dhl-express.uk:participants:dhl-uk-eu-freight",
-        "gx:legalName": "DHL Express (UK) Limited",
-        "gx:legalRegistrationNumber": {
-          "gx:leiCode": "529900OZN0B7E5F7F136",
-          "gx:vatID": "GB123456789"
+        "id": "did:web:dhl-express.uk-eu.ctt.dhl.com",
+        "gx:type": "gx:LegalPerson",
+        "gx:name": "DHL Express UK-EU Corridor Node",
+        "gx:description": "CTT edge node for cross-border freight decarbonisation and last-mile EV logistics between UK Midlands and EU Benelux hubs.",
+        "gx:countryCode": "GB",
+        "gx:location": {
+          "gx:latitude": 52.4862,
+          "gx:longitude": -1.8904
         },
-        "gx:headquarterAddress": {
-          "gx:countrySubdivisionCode": "GB-ENG",
-          "gx:streetAddress": "Charles de Gaulle Square, 2-8 Charles de Gaulle Square",
-          "gx:postalCode": "TW6 2FL",
-          "gx:locality": "Hounslow"
-        },
-        "gx:legalAddress": {
-          "gx:countrySubdivisionCode": "GB-ENG",
-          "gx:streetAddress": "Charles de Gaulle Square, 2-8 Charles de Gaulle Square",
-          "gx:postalCode": "TW6 2FL",
-          "gx:locality": "Hounslow"
-        }
-      }
-    },
-    {
-      "@context": ["https://www.w3.org/2018/credentials/v1"],
-      "type": ["VerifiableCredential", "gx:ServiceOffering"],
-      "id": "did:web:ctt.dhl-express.uk:services:uk-eu-freight-telemetry",
-      "issuer": "did:web:ctt.dhl-express.uk",
-      "issuanceDate": "2026-06-01T00:00:00Z",
-      "credentialSubject": {
-        "id": "did:web:ctt.dhl-express.uk:services:uk-eu-freight-telemetry",
-        "gx:providedBy": {
-          "id": "did:web:ctt.dhl-express.uk:participants:dhl-uk-eu-freight"
-        },
-        "gx:name": "DHL UK-EU Freight Corridor Telemetry Stream",
-        "gx:description": "Real-time telemetry from DHL Express freight vehicles operating on UK-EU corridors (M20, A20, Channel Tunnel). Includes position, speed, powertrain state, and emission estimates. Data is scoped to CTT cross-domain belief envelope v1.0.",
-        "ctt:corridor_scope": ["m20_corridor", "a20_charging_corridor", "pod_hinterland_corridor", "channel_tunnel"],
-        "ctt:data_sovereignty": "domain-dhl",
-        "ctt:schema_version": "ctt-belief-1.0",
-        "gx:policy": [
+        "gx:serviceOffering": [
           {
-            "type": "odrl:Policy",
-            "uid": "https://ctt.dhl-express.uk/policies/carbon-calculation-only",
-            "profile": "https://www.w3.org/ns/odrl/2/core",
-            "permission": [
+            "gx:id": "urn:ctt:service:telemetry:dhl",
+            "gx:name": "DHL Express Fleet Telemetry Feed",
+            "gx:description": "Real-time HGV/van telemetry (position, powertrain, energy, emissions) for carbon-intensity modelling on the M1-A1-E19 corridor.",
+            "gx:dataAccountExport": {
+              "gx:requestType": "API",
+              "gx:accessType": "digital",
+              "gx:formatType": "application/json"
+            }
+          },
+          {
+            "gx:id": "urn:ctt:service:policy:dhl",
+            "gx:name": "DHL Tactical Policy Ingest",
+            "gx:description": "Accepts structural policies (toll discounts, congestion charges) from DfT and applies them to fleet BDI mindset models.",
+            "gx:dataAccountExport": {
+              "gx:requestType": "ZMQ_SUB",
+              "gx:accessType": "digital",
+              "gx:formatType": "application/json"
+            }
+          }
+        ],
+        "gx:policy": {
+          "odrl:hasPolicy": {
+            "@type": "odrl:Agreement",
+            "odrl:uid": "urn:ctt:policy:dhl-carbon-calc-only",
+            "odrl:profile": "https://w3id.org/ctt/odrl-profile",
+            "odrl:permission": [
               {
-                "assigner": "did:web:ctt.dhl-express.uk:participants:dhl-uk-eu-freight",
-                "target": "did:web:ctt.dhl-express.uk:services:uk-eu-freight-telemetry",
-                "action": "odrl:use",
-                "constraint": [
+                "odrl:action": "odrl:use",
+                "odrl:constraint": [
                   {
-                    "leftOperand": "odrl:purpose",
-                    "operator": "odrl:eq",
-                    "rightOperand": "carbon_intensity_calculation"
+                    "odrl:leftOperand": "odrl:purpose",
+                    "odrl:operator": "odrl:eq",
+                    "odrl:rightOperand": "carbon_intensity_modelling"
                   }
                 ]
               }
             ],
-            "prohibition": [
+            "odrl:prohibition": [
               {
-                "target": "did:web:ctt.dhl-express.uk:services:uk-eu-freight-telemetry",
-                "action": "odrl:derive",
-                "constraint": [
+                "odrl:action": "odrl:share",
+                "odrl:constraint": [
                   {
-                    "leftOperand": "odrl:recipient",
-                    "operator": "odrl:neq",
-                    "rightOperand": "domain-dft"
+                    "odrl:leftOperand": "odrl:recipient",
+                    "odrl:operator": "odrl:neq",
+                    "odrl:rightOperand": "ctt_federation_peer"
                   }
                 ]
               }
             ]
           }
-        ],
-        "gx:termsAndConditions": {
-          "gx:URL": "https://ctt.dhl-express.uk/terms/gaiax-data-sharing-2026",
-          "gx:hash": "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
-        },
-        "gx:dataProtectionRegime": ["GDPR2016"],
-        "ctt:federation_peers": [
-          {
-            "target": "domain-dft",
-            "topic": "ctt.policy.structural",
-            "protocol": "zmq_sub"
-          },
-          {
-            "target": "domain-beis",
-            "topic": "ctt.belief.economic",
-            "protocol": "zmq_sub"
-          }
-        ]
+        }
       }
     }
   ],
@@ -110,7 +81,7 @@
     "type": "Ed25519Signature2020",
     "created": "2026-06-01T00:00:00Z",
     "proofPurpose": "assertionMethod",
-    "verificationMethod": "did:web:ctt.dhl-express.uk#key-1",
-    "proofValue": "z58DAdF...mock-signature..."
+    "verificationMethod": "did:web:dhl-express.uk-eu.ctt.dhl.com#key-1",
+    "proofValue": "z58DAdF..."
   }
 }

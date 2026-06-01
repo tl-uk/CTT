@@ -1,7 +1,8 @@
 // services/l1-engine/include/SimulationEngine.h
+// Phase 7 — Flecs ECS with externality & social-impact systems
 #pragma once
 #include <flecs.h>
-#include "AgentComponents.h"
+// #include "AgentComponents.h"
 
 namespace CTT {
 
@@ -12,13 +13,12 @@ namespace CTT {
     class SimulationEngine {
     public:
         SimulationEngine();
-        ~SimulationEngine() = default;
-
-        /** @brief Advances the Flecs world by delta_time. */
-        void update(float delta_time);
 
         /** @brief Returns the underlying Flecs world instance. */
         flecs::world& get_world();
+
+        /** @brief Advances the Flecs world by delta_time. */
+        void update(float delta_time);
 
         /** @brief Creates initial agents (eHGVs, Trains) in the world. */
         void initialize_test_fleet();

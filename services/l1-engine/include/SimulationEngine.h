@@ -2,7 +2,7 @@
 // Phase 7 — Flecs ECS with externality & social-impact systems
 #pragma once
 #include <flecs.h>
-// #include "AgentComponents.h"
+#include "AgentComponents.h"
 
 namespace CTT {
 

@@ -21,11 +21,11 @@ NPROCS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 #       L2_DIR  = physical path services/l2-bridge  → conceptually Layer 2 (Orchestration)
 #       L3_DIR  = physical path services/l3-analytics → conceptually Layer 5 (Macro Analytics)
 # =============================================================================
-L1_DIR     := services/l1-engine      # C++ Flecs engine (L3 Cognitive-Reflexive Core)
-L2_DIR     := services/l2-bridge      # Python dashboard + orchestrator (L2 Control)
-L3_DIR     := services/l3-analytics   # Python BPTK / data science (L5 Macro)
-L4_DIR     := services/l4-spatial     # Reserved: SUMO / OSM integration (L4 Spatial)
-L5_DIR     := services/l5-macro       # Python audit + federation (L5 Macro / National)
+L1_DIR     := services/l1-engine
+L2_DIR     := services/l2-bridge
+L3_DIR     := services/l3-analytics
+L4_DIR     := services/l4-spatial
+L5_DIR     := services/l5-macro
 BUILD_DIR  := $(L1_DIR)/build
 CONFIG_DIR := services/config
 
@@ -125,8 +125,24 @@ endif
 
 configure-engine: check-deps ## Configure CMake for L1 Engine (clean configure)
 	@echo "⚙️  Configuring L1 Engine..."
-	@rm -rf $(BUILD_DIR)
-	@cmake -B $(BUILD_DIR) -S $(L1_DIR) -G Ninja \
+	@echo "   L1_DIR     = '$(L1_DIR)'"
+	@echo "   BUILD_DIR  = '$(BUILD_DIR)'"
+	@if [ -z "$(BUILD_DIR)" ]; then \
+		echo "❌ BUILD_DIR is empty. Aborting."; \
+		exit 1; \
+	fi
+	@if [ "$(BUILD_DIR)" = "$(L1_DIR)" ]; then \
+		echo "❌ BUILD_DIR equals L1_DIR. Refusing to delete source tree."; \
+		exit 1; \
+	fi
+	@if [ -L "$(BUILD_DIR)" ]; then \
+		echo "⚠️  $(BUILD_DIR) is a symlink. Removing symlink only."; \
+		rm -f "$(BUILD_DIR)"; \
+	elif [ -e "$(BUILD_DIR)" ]; then \
+		echo "   Removing existing build directory..."; \
+		rm -rf "$(BUILD_DIR)"; \
+	fi
+	@cmake -B "$(BUILD_DIR)" -S "$(L1_DIR)" -G Ninja \
 		-DCMAKE_BUILD_TYPE=Release \
 		$(CMAKE_PLATFORM_ARGS) \
 		$(CMAKE_EXTRA) \
@@ -135,7 +151,7 @@ configure-engine: check-deps ## Configure CMake for L1 Engine (clean configure)
 
 build-engine: configure-engine ## Build the C++ L1 Engine with all cores
 	@echo "🔨 Building L1 Engine with $(NPROCS) cores..."
-	@cmake --build $(BUILD_DIR) --parallel $(NPROCS)
+	@cmake --build "$(BUILD_DIR)" --parallel $(NPROCS)
 	@echo ""
 	@echo "✅ Build complete: $(BUILD_DIR)/CTT_Engine"
 	@echo ""
@@ -165,12 +181,24 @@ run-engine-fast: ## Run L1 Engine WITHOUT rebuilding (blocks terminal)
 
 clean-engine: ## Remove L1 Engine build artifacts (defensive)
 	@echo "🧹 Cleaning L1 Engine build..."
-	@if [ -L "$(BUILD_DIR)" ]; then \
-		echo "❌ $(BUILD_DIR) is a symlink. Aborting to prevent source tree deletion."; \
-		echo "   Run: rm -f $(BUILD_DIR)  # removes symlink only"; \
+	@echo "   BUILD_DIR = '$(BUILD_DIR)'"
+	@echo "   L1_DIR    = '$(L1_DIR)'"
+	@if [ -z "$(BUILD_DIR)" ]; then \
+		echo "❌ BUILD_DIR is empty. Aborting."; \
 		exit 1; \
 	fi
-	@rm -rf $(BUILD_DIR)
+	@if [ "$(BUILD_DIR)" = "$(L1_DIR)" ]; then \
+		echo "❌ BUILD_DIR equals L1_DIR. Refusing to delete source tree."; \
+		exit 1; \
+	fi
+	@if [ -L "$(BUILD_DIR)" ]; then \
+		echo "⚠️  $(BUILD_DIR) is a symlink. Removing symlink only."; \
+		rm -f "$(BUILD_DIR)"; \
+	elif [ -e "$(BUILD_DIR)" ]; then \
+		rm -rf "$(BUILD_DIR)"; \
+	else \
+		echo "   Build directory does not exist — nothing to clean."; \
+	fi
 	@echo "✅ Clean complete"
 
 docker-engine: ## Build L1 Engine Docker image

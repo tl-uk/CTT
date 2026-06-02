@@ -163,8 +163,13 @@ run-engine-fast: ## Run L1 Engine WITHOUT rebuilding (blocks terminal)
 	@echo "🚀 Starting CTT L1 Engine (fast mode, no rebuild)..."
 	@./$(BUILD_DIR)/CTT_Engine
 
-clean-engine: ## Remove L1 Engine build artifacts
+clean-engine: ## Remove L1 Engine build artifacts (defensive)
 	@echo "🧹 Cleaning L1 Engine build..."
+	@if [ -L "$(BUILD_DIR)" ]; then \
+		echo "❌ $(BUILD_DIR) is a symlink. Aborting to prevent source tree deletion."; \
+		echo "   Run: rm -f $(BUILD_DIR)  # removes symlink only"; \
+		exit 1; \
+	fi
 	@rm -rf $(BUILD_DIR)
 	@echo "✅ Clean complete"
 

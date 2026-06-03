@@ -9,8 +9,10 @@ Phase 6.5 NOTE: Layer2Orchestrator now runs as a separate service
 scaling. This file retains the PolicySubscriber for L5 structural feedback.
 """
 import json
+import logging
 import os
 import sys
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass, asdict
@@ -22,6 +24,15 @@ from flask import Flask, jsonify, request
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "config"))
 from ports import ZMQ_PORTS, get_resilient_socket
 from settings import config
+
+# =============================================================================
+# Logging
+# =============================================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger("ctt.dashboard")
 
 # =============================================================================
 # Configuration
@@ -84,9 +95,9 @@ class TelemetryCollector:
         self._thread = None
         self._last_message_time: float = 0.0
         self._message_count: int = 0
+        self._states_lock = threading.Lock()
 
     def start(self):
-        import threading
         if self._running:
             return
         self._running = True
@@ -97,7 +108,6 @@ class TelemetryCollector:
         ctx = zmq.Context()
         sub = get_resilient_socket(ctx, zmq.SUB, is_sub=True)
 
-        # Connect to engine telemetry with retry
         telemetry_addr = ZMQ_PORTS.get("L1_TELEMETRY_SUB", "tcp://localhost:5555")
         max_retries = 10
         for attempt in range(max_retries):
@@ -105,77 +115,90 @@ class TelemetryCollector:
                 sub.connect(telemetry_addr)
                 break
             except zmq.ZMQError:
-                print(f"[Dashboard] Telemetry connect attempt {attempt+1}/{max_retries} failed, retrying...")
+                logger.warning("Telemetry connect attempt %d/%d failed, retrying...", attempt + 1, max_retries)
                 time.sleep(1)
 
         sub.setsockopt_string(zmq.SUBSCRIBE, "")
         sub.set(zmq.RCVTIMEO, 2000)
 
-        print(f"[Dashboard] Telemetry subscriber connected to {telemetry_addr}")
+        logger.info("Telemetry subscriber connected to %s", telemetry_addr)
 
         while self._running:
             try:
                 msg = sub.recv()
-                self._last_message_time = time.time()
-                self._message_count += 1
                 data = json.loads(msg.decode("utf-8"))
                 if isinstance(data, list):
-                    for agent in data:
-                        self.buffer.append({
-                            "time": time.time(),
-                            "agent": agent
-                        })
-                        self.latest_states[agent.get("entity_name", "unknown")] = AgentState(
-                            entity_name=agent.get("entity_name", "unknown"),
-                            mode=agent.get("mode", 0),
-                            powertrain=agent.get("powertrain", 0),
-                            energy_pct=agent.get("energy_pct", 0.0),
-                            lat=agent.get("lat", 0.0),
-                            lon=agent.get("lon", 0.0),
-                            adversarial_pressure=agent.get("adversarial_pressure", 0.0),
-                            is_decarbonized=agent.get("is_decarbonized", False),
-                            timestamp=time.time(),
-                            current_co2_g_km=agent.get("current_co2_g_km", 0.0),
-                            current_nox_g_km=agent.get("current_nox_g_km", 0.0),
-                            current_pm25_g_km=agent.get("current_pm25_g_km", 0.0),
-                            current_noise_db=agent.get("current_noise_db", 0.0),
-                            cumulative_co2_kg=agent.get("cumulative_co2_kg", 0.0),
-                            cumulative_nox_kg=agent.get("cumulative_nox_kg", 0.0),
-                            cumulative_pm25_kg=agent.get("cumulative_pm25_kg", 0.0),
-                            accessibility_score=agent.get("accessibility_score", 0.0),
-                            jobs_dependent=agent.get("jobs_dependent", 0),
-                            deprivation_index=agent.get("deprivation_index", 0.0),
-                            equity_exposure=agent.get("equity_exposure", 0.0),
-                            serves_deprived_ward=agent.get("serves_deprived_ward", False),
-                            corridor_id=agent.get("corridor_id", "")
-                        )
+                    recv_time = time.time()
+                    with self._states_lock:
+                        self._last_message_time = recv_time
+                        self._message_count += len(data)
+                        for agent in data:
+                            self.buffer.append({
+                                "time": recv_time,
+                                "agent": agent
+                            })
+                            self.latest_states[agent.get("entity_name", "unknown")] = AgentState(
+                                entity_name=agent.get("entity_name", "unknown"),
+                                mode=agent.get("mode", 0),
+                                powertrain=agent.get("powertrain", 0),
+                                energy_pct=agent.get("energy_pct", 0.0),
+                                lat=agent.get("lat", 0.0),
+                                lon=agent.get("lon", 0.0),
+                                adversarial_pressure=agent.get("adversarial_pressure", 0.0),
+                                is_decarbonized=agent.get("is_decarbonized", False),
+                                timestamp=recv_time,
+                                current_co2_g_km=agent.get("current_co2_g_km", 0.0),
+                                current_nox_g_km=agent.get("current_nox_g_km", 0.0),
+                                current_pm25_g_km=agent.get("current_pm25_g_km", 0.0),
+                                current_noise_db=agent.get("current_noise_db", 0.0),
+                                cumulative_co2_kg=agent.get("cumulative_co2_kg", 0.0),
+                                cumulative_nox_kg=agent.get("cumulative_nox_kg", 0.0),
+                                cumulative_pm25_kg=agent.get("cumulative_pm25_kg", 0.0),
+                                accessibility_score=agent.get("accessibility_score", 0.0),
+                                jobs_dependent=agent.get("jobs_dependent", 0),
+                                deprivation_index=agent.get("deprivation_index", 0.0),
+                                equity_exposure=agent.get("equity_exposure", 0.0),
+                                serves_deprived_ward=agent.get("serves_deprived_ward", False),
+                                corridor_id=agent.get("corridor_id", "")
+                            )
             except zmq.error.Again:
                 continue
             except Exception as e:
-                print(f"[Dashboard] Telemetry error: {e}")
+                logger.exception("Telemetry error: %s", e)
 
         sub.close()
         ctx.term()
 
+    def _get_states_snapshot(self) -> dict[str, AgentState]:
+        with self._states_lock:
+            return dict(self.latest_states)
+
     def get_latest(self) -> list[dict]:
-        return [asdict(state) for state in self.latest_states.values()]
+        states = self._get_states_snapshot()
+        return [asdict(state) for state in states.values()]
 
     def get_history(self, agent_name: Optional[str] = None, limit: int = 100) -> list[dict]:
+        # deque iteration is atomic enough for CPython, but slice for safety
+        with self._states_lock:
+            buf = list(self.buffer)
         if agent_name:
             return [
-                entry for entry in self.buffer
+                entry for entry in buf
                 if entry["agent"].get("entity_name") == agent_name
             ][-limit:]
-        return list(self.buffer)[-limit:]
+        return buf[-limit:]
 
     def get_agent_names(self) -> list[str]:
-        return list(self.latest_states.keys())
+        with self._states_lock:
+            return list(self.latest_states.keys())
 
     def is_healthy(self) -> bool:
-        """Check if telemetry is flowing (received message within last 10s)."""
-        if self._message_count == 0:
+        with self._states_lock:
+            msg_count = self._message_count
+            last_time = self._last_message_time
+        if msg_count == 0:
             return False
-        return (time.time() - self._last_message_time) < 10.0
+        return (time.time() - last_time) < 10.0
 
 
 # =============================================================================
@@ -203,7 +226,7 @@ class ScenarioEngine:
     def simulate(self, scenario_id: str) -> Optional[dict]:
         for sc in self.scenarios:
             if sc.scenario_id == scenario_id:
-                baseline = self.collector.latest_states
+                baseline = self.collector._get_states_snapshot()
                 predicted = {}
                 for agent_name, state in baseline.items():
                     delta = sc.parameter_changes.get("pressure_delta", 0)
@@ -260,17 +283,11 @@ class ScenarioEngine:
 # =============================================================================
 
 class PolicySubscriber:
-    """
-    Listens to L5 Federation Bridge on ZMQ POLICY_SUB (5563).
-    Receives slow-varying structural policies (e.g., toll discounts)
-    and logs them. In future, this feeds directly into ScenarioEngine.
-    """
     def __init__(self):
         self._running = False
         self._thread = None
 
     def start(self):
-        import threading
         if self._running:
             return
         self._running = True
@@ -286,18 +303,17 @@ class PolicySubscriber:
         except zmq.ZMQError:
             pass
         sub.setsockopt_string(zmq.SUBSCRIBE, "")
-        print(f"[PolicySubscriber] Listening for structural policies on {policy_addr}")
+        logger.info("PolicySubscriber listening on %s", policy_addr)
 
         while self._running:
             try:
                 msg = sub.recv_string()
                 data = json.loads(msg)
-                print(f"[PolicySubscriber] Structural policy received: {data}")
-                # Future: merge into ScenarioEngine as standing parameter offset
+                logger.info("Structural policy received: %s", data)
             except zmq.error.Again:
                 continue
             except Exception as e:
-                print(f"[PolicySubscriber] Error: {e}")
+                logger.exception("PolicySubscriber error: %s", e)
         sub.close()
         ctx.term()
 
@@ -314,10 +330,10 @@ collector = TelemetryCollector()
 scenarios = ScenarioEngine(collector)
 policy_sub = PolicySubscriber()
 
-# EAGER START: Start collector and policy listener immediately
+# EAGER START
 collector.start()
 policy_sub.start()
-print("[Dashboard] Telemetry collector + Policy subscriber started eagerly")
+logger.info("Telemetry collector + Policy subscriber started eagerly")
 
 
 # -----------------------------------------------------------------------------
@@ -326,40 +342,56 @@ print("[Dashboard] Telemetry collector + Policy subscriber started eagerly")
 
 @app.route("/health")
 def health():
-    return jsonify({
-        "status": "ok",
-        "agents_online": len(collector.latest_states),
-        "telemetry_messages": collector._message_count,
-        "telemetry_flowing": collector.is_healthy(),
-        "agent_names": collector.get_agent_names()
-    })
+    try:
+        return jsonify({
+            "status": "ok",
+            "agents_online": len(collector._get_states_snapshot()),
+            "telemetry_messages": collector._message_count,
+            "telemetry_flowing": collector.is_healthy(),
+            "agent_names": collector.get_agent_names()
+        })
+    except Exception as e:
+        logger.exception("Health endpoint error: %s", e)
+        return jsonify({"status": "error", "detail": str(e)}), 500
 
 
 @app.route("/api/v1/agents")
 def list_agents():
-    agents = collector.get_latest()
-    return jsonify({
-        "agents": agents,
-        "count": len(agents),
-        "timestamp": time.time()
-    })
+    try:
+        agents = collector.get_latest()
+        return jsonify({
+            "agents": agents,
+            "count": len(agents),
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        logger.exception("List agents error: %s", e)
+        return jsonify({"status": "error", "detail": str(e)}), 500
 
 
 @app.route("/api/v1/agents/<agent_name>")
 def get_agent(agent_name):
-    state = collector.latest_states.get(agent_name)
-    if state:
-        return jsonify(asdict(state))
-    return jsonify({"error": "Agent not found"}), 404
+    try:
+        state = collector._get_states_snapshot().get(agent_name)
+        if state:
+            return jsonify(asdict(state))
+        return jsonify({"error": "Agent not found"}), 404
+    except Exception as e:
+        logger.exception("Get agent error: %s", e)
+        return jsonify({"status": "error", "detail": str(e)}), 500
 
 
 @app.route("/api/v1/agents/<agent_name>/history")
 def get_agent_history(agent_name):
-    limit = request.args.get("limit", 100, type=int)
-    return jsonify({
-        "agent": agent_name,
-        "history": collector.get_history(agent_name, limit)
-    })
+    try:
+        limit = request.args.get("limit", 100, type=int)
+        return jsonify({
+            "agent": agent_name,
+            "history": collector.get_history(agent_name, limit)
+        })
+    except Exception as e:
+        logger.exception("Agent history error: %s", e)
+        return jsonify({"status": "error", "detail": str(e)}), 500
 
 # ---------------------------------------------------------------------------
 # Phase 7 — Externality & Social Impact Aggregation
@@ -368,78 +400,86 @@ def get_agent_history(agent_name):
 @app.route("/api/v1/externality/summary")
 def externality_summary():
     """Aggregate emissions across all agents, by corridor and powertrain."""
-    agents = collector.get_latest()
-    summary = {
-        "total_co2_kg": 0.0,
-        "total_nox_kg": 0.0,
-        "total_pm25_kg": 0.0,
-        "avg_noise_db": 0.0,
-        "by_corridor": {},
-        "by_powertrain": {},
-        "deprived_ward_exposure": {
-            "agents_serving": 0,
-            "total_equity_exposure": 0.0,
-            "total_jobs_at_risk": 0
-        }
-    }
-    noise_count = 0
-    for agent in agents:
-        summary["total_co2_kg"] += agent.get("cumulative_co2_kg", 0.0)
-        summary["total_nox_kg"] += agent.get("cumulative_nox_kg", 0.0)
-        summary["total_pm25_kg"] += agent.get("cumulative_pm25_kg", 0.0)
-        n = agent.get("current_noise_db", 0.0)
-        if n > 0:
-            summary["avg_noise_db"] += n
-            noise_count += 1
-
-        corridor = agent.get("corridor_id", "unknown")
-        if corridor not in summary["by_corridor"]:
-            summary["by_corridor"][corridor] = {
-                "agent_count": 0, "co2_kg": 0.0, "nox_kg": 0.0,
-                "pm25_kg": 0.0, "jobs_dependent": 0
+    try:
+        agents = collector.get_latest()
+        summary = {
+            "total_co2_kg": 0.0,
+            "total_nox_kg": 0.0,
+            "total_pm25_kg": 0.0,
+            "avg_noise_db": 0.0,
+            "by_corridor": {},
+            "by_powertrain": {},
+            "deprived_ward_exposure": {
+                "agents_serving": 0,
+                "total_equity_exposure": 0.0,
+                "total_jobs_at_risk": 0
             }
-        summary["by_corridor"][corridor]["agent_count"] += 1
-        summary["by_corridor"][corridor]["co2_kg"] += agent.get("cumulative_co2_kg", 0.0)
-        summary["by_corridor"][corridor]["nox_kg"] += agent.get("cumulative_nox_kg", 0.0)
-        summary["by_corridor"][corridor]["pm25_kg"] += agent.get("cumulative_pm25_kg", 0.0)
-        summary["by_corridor"][corridor]["jobs_dependent"] += agent.get("jobs_dependent", 0)
+        }
+        noise_count = 0
+        for agent in agents:
+            summary["total_co2_kg"] += agent.get("cumulative_co2_kg", 0.0)
+            summary["total_nox_kg"] += agent.get("cumulative_nox_kg", 0.0)
+            summary["total_pm25_kg"] += agent.get("cumulative_pm25_kg", 0.0)
+            n = agent.get("current_noise_db", 0.0)
+            if n > 0:
+                summary["avg_noise_db"] += n
+                noise_count += 1
 
-        pt = agent.get("powertrain", 0)
-        pt_name = {0: "ICE_DIESEL", 1: "ICE_PETROL", 2: "BEV_ELECTRIC",
-                   3: "FCEV_HYDROGEN", 4: "HYBRID"}.get(pt, "UNKNOWN")
-        if pt_name not in summary["by_powertrain"]:
-            summary["by_powertrain"][pt_name] = {"agent_count": 0, "co2_kg": 0.0}
-        summary["by_powertrain"][pt_name]["agent_count"] += 1
-        summary["by_powertrain"][pt_name]["co2_kg"] += agent.get("cumulative_co2_kg", 0.0)
+            corridor = agent.get("corridor_id", "unknown")
+            if corridor not in summary["by_corridor"]:
+                summary["by_corridor"][corridor] = {
+                    "agent_count": 0, "co2_kg": 0.0, "nox_kg": 0.0,
+                    "pm25_kg": 0.0, "jobs_dependent": 0
+                }
+            summary["by_corridor"][corridor]["agent_count"] += 1
+            summary["by_corridor"][corridor]["co2_kg"] += agent.get("cumulative_co2_kg", 0.0)
+            summary["by_corridor"][corridor]["nox_kg"] += agent.get("cumulative_nox_kg", 0.0)
+            summary["by_corridor"][corridor]["pm25_kg"] += agent.get("cumulative_pm25_kg", 0.0)
+            summary["by_corridor"][corridor]["jobs_dependent"] += agent.get("jobs_dependent", 0)
 
-        if agent.get("serves_deprived_ward", False):
-            summary["deprived_ward_exposure"]["agents_serving"] += 1
-            summary["deprived_ward_exposure"]["total_equity_exposure"] += agent.get("equity_exposure", 0.0)
-            summary["deprived_ward_exposure"]["total_jobs_at_risk"] += agent.get("jobs_dependent", 0)
+            pt = agent.get("powertrain", 0)
+            pt_name = {0: "ICE_DIESEL", 1: "ICE_PETROL", 2: "BEV_ELECTRIC",
+                       3: "FCEV_HYDROGEN", 4: "HYBRID"}.get(pt, "UNKNOWN")
+            if pt_name not in summary["by_powertrain"]:
+                summary["by_powertrain"][pt_name] = {"agent_count": 0, "co2_kg": 0.0}
+            summary["by_powertrain"][pt_name]["agent_count"] += 1
+            summary["by_powertrain"][pt_name]["co2_kg"] += agent.get("cumulative_co2_kg", 0.0)
 
-    if noise_count > 0:
-        summary["avg_noise_db"] /= noise_count
+            if agent.get("serves_deprived_ward", False):
+                summary["deprived_ward_exposure"]["agents_serving"] += 1
+                summary["deprived_ward_exposure"]["total_equity_exposure"] += agent.get("equity_exposure", 0.0)
+                summary["deprived_ward_exposure"]["total_jobs_at_risk"] += agent.get("jobs_dependent", 0)
 
-    return jsonify(summary)
+        if noise_count > 0:
+            summary["avg_noise_db"] /= noise_count
+
+        return jsonify(summary)
+    except Exception as e:
+        logger.exception("Externality summary error: %s", e)
+        return jsonify({"status": "error", "detail": str(e)}), 500
 
 
 @app.route("/api/v1/social-impact/corridor/<corridor_id>")
 def corridor_social_impact(corridor_id):
-    """Social impact profile for a specific corridor (e.g., a20_charging_corridor)."""
-    agents = collector.get_latest()
-    corridor_agents = [a for a in agents if a.get("corridor_id") == corridor_id]
-    if not corridor_agents:
-        return jsonify({"error": "Corridor not found or no agents assigned"}), 404
+    """Social impact profile for a specific corridor."""
+    try:
+        agents = collector.get_latest()
+        corridor_agents = [a for a in agents if a.get("corridor_id") == corridor_id]
+        if not corridor_agents:
+            return jsonify({"error": "Corridor not found or no agents assigned"}), 404
 
-    return jsonify({
-        "corridor_id": corridor_id,
-        "agent_count": len(corridor_agents),
-        "avg_accessibility": sum(a.get("accessibility_score", 0) for a in corridor_agents) / len(corridor_agents),
-        "total_jobs_dependent": sum(a.get("jobs_dependent", 0) for a in corridor_agents),
-        "avg_deprivation": sum(a.get("deprivation_index", 0) for a in corridor_agents) / len(corridor_agents),
-        "serves_deprived_ward_count": sum(1 for a in corridor_agents if a.get("serves_deprived_ward")),
-        "agents": corridor_agents
-    })
+        return jsonify({
+            "corridor_id": corridor_id,
+            "agent_count": len(corridor_agents),
+            "avg_accessibility": sum(a.get("accessibility_score", 0) for a in corridor_agents) / len(corridor_agents),
+            "total_jobs_dependent": sum(a.get("jobs_dependent", 0) for a in corridor_agents),
+            "avg_deprivation": sum(a.get("deprivation_index", 0) for a in corridor_agents) / len(corridor_agents),
+            "serves_deprived_ward_count": sum(1 for a in corridor_agents if a.get("serves_deprived_ward")),
+            "agents": corridor_agents
+        })
+    except Exception as e:
+        logger.exception("Social impact corridor error: %s", e)
+        return jsonify({"status": "error", "detail": str(e)}), 500
 
 
 # -----------------------------------------------------------------------------
@@ -448,45 +488,61 @@ def corridor_social_impact(corridor_id):
 
 @app.route("/api/v1/scenarios", methods=["POST"])
 def create_scenario():
-    data = request.get_json() or {}
-    sc = scenarios.create_scenario(
-        description=data.get("description", "Untitled"),
-        parameter_changes=data.get("parameter_changes", {})
-    )
-    return jsonify({
-        "scenario_id": sc.scenario_id,
-        "status": sc.status,
-        "message": "Scenario created. Run /simulate to preview."
-    }), 201
+    try:
+        data = request.get_json() or {}
+        sc = scenarios.create_scenario(
+            description=data.get("description", "Untitled"),
+            parameter_changes=data.get("parameter_changes", {})
+        )
+        return jsonify({
+            "scenario_id": sc.scenario_id,
+            "status": sc.status,
+            "message": "Scenario created. Run /simulate to preview."
+        }), 201
+    except Exception as e:
+        logger.exception("Create scenario error: %s", e)
+        return jsonify({"status": "error", "detail": str(e)}), 500
 
 
 @app.route("/api/v1/scenarios/<scenario_id>/simulate", methods=["POST"])
 def simulate_scenario(scenario_id):
-    result = scenarios.simulate(scenario_id)
-    if result is None:
-        return jsonify({"error": "Scenario not found"}), 404
-    return jsonify({
-        "scenario_id": scenario_id,
-        "status": "simulated",
-        "predicted_outcome": result
-    })
+    try:
+        result = scenarios.simulate(scenario_id)
+        if result is None:
+            return jsonify({"error": "Scenario not found"}), 404
+        return jsonify({
+            "scenario_id": scenario_id,
+            "status": "simulated",
+            "predicted_outcome": result
+        })
+    except Exception as e:
+        logger.exception("Simulate scenario error: %s", e)
+        return jsonify({"status": "error", "detail": str(e)}), 500
 
 
 @app.route("/api/v1/scenarios/<scenario_id>/apply", methods=["POST"])
 def apply_scenario(scenario_id):
-    success = scenarios.apply_scenario(scenario_id)
-    if not success:
-        return jsonify({"error": "Scenario not found or not simulated"}), 400
-    return jsonify({
-        "scenario_id": scenario_id,
-        "status": "applied",
-        "message": "Perturbation injected into C++ engine"
-    })
+    try:
+        success = scenarios.apply_scenario(scenario_id)
+        if not success:
+            return jsonify({"error": "Scenario not found or not simulated"}), 400
+        return jsonify({
+            "scenario_id": scenario_id,
+            "status": "applied",
+            "message": "Perturbation injected into C++ engine"
+        })
+    except Exception as e:
+        logger.exception("Apply scenario error: %s", e)
+        return jsonify({"status": "error", "detail": str(e)}), 500
 
 
 @app.route("/api/v1/scenarios")
 def list_scenarios():
-    return jsonify({"scenarios": scenarios.list_scenarios()})
+    try:
+        return jsonify({"scenarios": scenarios.list_scenarios()})
+    except Exception as e:
+        logger.exception("List scenarios error: %s", e)
+        return jsonify({"status": "error", "detail": str(e)}), 500
 
 
 # -----------------------------------------------------------------------------
@@ -496,30 +552,34 @@ def list_scenarios():
 @app.route("/api/v1/control/perturb", methods=["POST"])
 def direct_perturb():
     """Inject a raw perturbation directly (bypasses scenario engine)."""
-    data = request.get_json() or {}
-    agent_uuid = data.get("agent_uuid", "all_hgv")
-    pressure_delta = float(data.get("pressure_delta", 0))
+    try:
+        data = request.get_json() or {}
+        agent_uuid = data.get("agent_uuid", "all_hgv")
+        pressure_delta = float(data.get("pressure_delta", 0))
 
-    ctx = zmq.Context()
-    pub = get_resilient_socket(ctx, zmq.PUB)
-    pub.connect(ZMQ_PORTS["L1_PERTURBATION_SUB"])
-    time.sleep(0.3)
+        ctx = zmq.Context()
+        pub = get_resilient_socket(ctx, zmq.PUB)
+        pub.connect(ZMQ_PORTS["L1_PERTURBATION_SUB"])
+        time.sleep(0.3)
 
-    payload = {
-        "agent_uuid": agent_uuid,
-        "pressure_delta": pressure_delta,
-        "source": "dashboard_direct"
-    }
-    pub.send_string(json.dumps(payload))
+        payload = {
+            "agent_uuid": agent_uuid,
+            "pressure_delta": pressure_delta,
+            "source": "dashboard_direct"
+        }
+        pub.send_string(json.dumps(payload))
 
-    pub.close()
-    ctx.term()
+        pub.close()
+        ctx.term()
 
-    return jsonify({
-        "agent_uuid": agent_uuid,
-        "pressure_delta": pressure_delta,
-        "status": "sent"
-    })
+        return jsonify({
+            "agent_uuid": agent_uuid,
+            "pressure_delta": pressure_delta,
+            "status": "sent"
+        })
+    except Exception as e:
+        logger.exception("Direct perturb error: %s", e)
+        return jsonify({"status": "error", "detail": str(e)}), 500
 
 
 # =============================================================================
@@ -527,11 +587,8 @@ def direct_perturb():
 # =============================================================================
 
 if __name__ == "__main__":
-    # Already started eagerly above, but ensure it's running
     if not collector._running:
         collector.start()
     if not policy_sub._running:
         policy_sub.start()
-    # Phase 6.5: Layer2Orchestrator now runs as a separate service
-    # (services/l2-orchestrator/orchestrator.py) to avoid port conflicts.
     app.run(host="0.0.0.0", port=5001, debug=False)

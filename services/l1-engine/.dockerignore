@@ -1,0 +1,58 @@
+# CTT L1 Engine — Docker build context exclusions
+# Reduces build context from ~500MB to ~15MB
+
+# Git
+.git
+.gitignore
+
+# Python / virtual environments (from other services)
+**/.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+
+# Build artifacts (never send host build tree into Docker)
+build/
+build-*/
+cmake-build-*/
+*.o
+*.a
+*.so
+*.dylib
+CTT_Engine
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed for compile)
+*.md
+docs/
+
+# Test fixtures (engine has no Docker tests)
+tests/
+fixtures/
+
+# Data & archives
+data/
+*.zip
+*.tar
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+
+# Large data files
+*.csv
+*.parquet
+*.h5
+*.hdf5
+
+# Keep: src/, include/, CMakeLists.txt, Dockerfile, api/proto/

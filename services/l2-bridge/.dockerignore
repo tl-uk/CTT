@@ -1,0 +1,54 @@
+# CTT L2 Bridge — Docker build context exclusions
+# Reduces build context from ~200MB to ~5MB
+
+# Git
+.git
+.gitignore
+
+# Local Python environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Build artifacts from other services
+../l1-engine/build/
+../l1-engine/build-*/
+../data-pipeline/**/build/
+
+# IDE / editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Logs & temp files
+*.log
+/tmp/
+
+# Data & archives
+data/
+*.zip
+*.tar
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+
+# Large data / model caches
+*.csv
+*.parquet
+*.h5
+*.hdf5
+models/
+checkpoints/
+
+# Keep: dashboard.py, requirements.txt, Dockerfile, settings.py references

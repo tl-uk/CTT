@@ -1,0 +1,49 @@
+# CTT L2 Orchestrator — Docker build context exclusions
+.git
+.gitignore
+
+# Python caches & environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Build artifacts from other services
+../l1-engine/build/
+../l1-engine/build-*/
+../data-pipeline/**/build/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs & temp
+*.log
+/tmp/
+
+# Data & archives
+data/
+*.zip
+*.tar
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+
+# Large data / models
+*.csv
+*.parquet
+*.h5
+*.hdf5
+models/
+checkpoints/
+
+# Keep: orchestrator.py, requirements.txt, Dockerfile

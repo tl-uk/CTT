@@ -1,50 +1,111 @@
-# Git
+# CTT Project Root — Global Docker build context exclusions
+# All Dockerfiles in this project use 'context: ..', so this file
+# at the repository root filters the build context for EVERY service.
+
+# =============================================================================
+# Version control
+# =============================================================================
 .git
 .gitignore
+.gitattributes
 
-# Build artifacts
-services/l1-engine/build/
-**/__pycache__/
+# =============================================================================
+# Python — global
+# =============================================================================
+**/.venv
+**/venv
+**/__pycache__
 **/*.pyc
 **/*.pyo
-**/.pytest_cache/
-**/.mypy_cache/
+**/*.egg-info
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.coverage
+**/htmlcov
 
-# Virtual environments
-**/.venv/
-**/venv/
-**/env/
+# =============================================================================
+# C++ build artifacts (never send host build tree into Docker builders)
+# =============================================================================
+**/build/
+**/build-*/
+**/cmake-build-*/
+**/*.o
+**/*.a
+**/*.so
+**/*.dylib
+**/*.dll
+**/CTT_Engine
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
+# =============================================================================
+# IDE / editors / OS
+# =============================================================================
+**/.vscode
+**/.idea
+**/*.swp
+**/*.swo
+*~
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Docker
-deploy/
-docker-compose.yml
-Dockerfile*
-.dockerignore
-
-# Docs
+# =============================================================================
+# Documentation (not needed at compile / runtime)
+# =============================================================================
 *.md
-*.pdf
+docs/
+README*
+LICENSE*
 
-# Logs
-*.log
-logs/
-tmp/
-
-# Data
+# =============================================================================
+# Data & archives (often very large — NEVER send into Docker context)
+# =============================================================================
 data/
-*.zip
-*.tar
-*.tar.gz
+**/*.zip
+**/*.tar
+**/*.tar.gz
+**/*.tar.bz2
+**/*.tar.xz
+**/*.rar
+**/*.7z
+**/*.gz
+**/*.bz2
 
-# Node
+# =============================================================================
+# Test fixtures & local data (often large)
+# =============================================================================
+**/tests/fixtures/*.json
+**/tests/fixtures/*.csv
+**/tests/fixtures/*.parquet
+**/*.csv
+**/*.parquet
+**/*.h5
+**/*.hdf5
+**/*.nc
+**/*.tif
+**/*.geojson
+
+# =============================================================================
+# Local runtime logs & temp
+# =============================================================================
+*.log
+/tmp/
+/logs/
+
+# =============================================================================
+# Docker itself (avoid recursive copies)
+# =============================================================================
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+
+# =============================================================================
+# Node / frontend (if any)
+# =============================================================================
 node_modules/
+**/node_modules/
+
+# =============================================================================
+# Keep: source code, configs, proto definitions, Makefiles, requirements
+# =============================================================================
+# (Everything NOT excluded above is kept)

@@ -1,6 +1,3 @@
-# =============================================================================
-# Updated test_multi_domain.py — REST-based verification (architectural fix)
-# =============================================================================
 #!/usr/bin/env python3
 """
 scripts/test_multi_domain.py
@@ -39,6 +36,7 @@ Requires: Docker Compose v2, Python 3.10+, requests, zmq
 """
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -54,6 +52,9 @@ import zmq
 PROJECT_ROOT = Path(__file__).parent.parent
 COMPOSE_BASE = PROJECT_ROOT / "deploy" / "docker-compose.yml"
 GENERATOR = PROJECT_ROOT / "scripts" / "generate_domain_compose.py"
+
+# Detect Docker Compose command (v2 vs v1)
+DOCKER_COMPOSE = ["docker", "compose"] if shutil.which("docker") else ["docker-compose"]
 
 
 def get_compose_path(domain: str) -> Path:
@@ -72,7 +73,6 @@ def get_host_ports(domain: str) -> dict:
             text = domains_file.read_text()
             import re
             # Find port_offset under this domain block
-            domain_short = domain.replace("domain-", "")
             pattern = rf"{re.escape(domain)}:\s*\n(?:\s+.*\n)*?\s+port_offset:\s*(\d+)"
             match = re.search(pattern, text)
             if match:
@@ -189,13 +189,13 @@ def phase_bring_up(domain: str, is_base: bool = False):
     if is_base:
         compose = COMPOSE_BASE
         # FIX: Isolate base project to prevent cross-domain orphan killing
-        run(["docker-compose", "-p", "ctt-dft", "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
-        run(["docker-compose", "-p", "ctt-dft", "-f", str(compose), "up", "--build", "-d"])
+        run(DOCKER_COMPOSE + ["-p", "ctt-dft", "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
+        run(DOCKER_COMPOSE + ["-p", "ctt-dft", "-f", str(compose), "up", "--build", "-d"])
     else:
         compose = get_compose_path(domain)
         project_name = domain.replace("domain-", "ctt-")
-        run(["docker-compose", "-p", project_name, "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
-        run(["docker-compose", "-p", project_name, "-f", str(compose), "up", "--build", "-d"])
+        run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
+        run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "--build", "-d"])
     data = health_check(domain)
     print(f"  [{domain}] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
 
@@ -227,7 +227,7 @@ def phase_resilience_disconnect(domain_b: str):
     log_step(5, f"Disconnect {domain_b} (simulate stakeholder outage)")
     compose = get_compose_path(domain_b)
     project_name = domain_b.replace("domain-", "ctt-")
-    run(["docker-compose", "-p", project_name, "-f", str(compose), "down"])
+    run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "down"])
     time.sleep(3)
 
 
@@ -241,7 +241,7 @@ def phase_reconnect(domain_b: str):
     log_step(7, f"Reconnect {domain_b} (simulate recovery)")
     compose = get_compose_path(domain_b)
     project_name = domain_b.replace("domain-", "ctt-")
-    run(["docker-compose", "-p", project_name, "-f", str(compose), "up", "-d"])
+    run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "-d"])
     data = health_check(domain_b)
     print(f"  [{domain_b}] Recovered: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
 
@@ -269,17 +269,16 @@ def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
         return
 
     log_step(9, "Cleanup: tear down both domains")
-    # FIX: Define project_name_b before use
     project_name_b = domain_b.replace("domain-", "ctt-")
-    run(["docker-compose", "-p", project_name_b, "-f", str(get_compose_path(domain_b)), "down", "--volumes", "--remove-orphans"], check=False)
-    
+    run(DOCKER_COMPOSE + ["-p", project_name_b, "-f", str(get_compose_path(domain_b)), "down", "--volumes", "--remove-orphans"], check=False)
+
     if domain_a != "domain-dft":
         project_name_a = domain_a.replace("domain-", "ctt-")
-        run(["docker-compose", "-p", project_name_a, "-f", str(get_compose_path(domain_a)), "down", "--volumes", "--remove-orphans"], check=False)
+        run(DOCKER_COMPOSE + ["-p", project_name_a, "-f", str(get_compose_path(domain_a)), "down", "--volumes", "--remove-orphans"], check=False)
     else:
         # Base domain also needs project isolation to prevent cross-domain orphan killing
-        run(["docker-compose", "-p", "ctt-dft", "-f", str(COMPOSE_BASE), "down", "--volumes", "--remove-orphans"], check=False)
-    
+        run(DOCKER_COMPOSE + ["-p", "ctt-dft", "-f", str(COMPOSE_BASE), "down", "--volumes", "--remove-orphans"], check=False)
+
     print("[OK] All stacks torn down")
 
 
@@ -300,6 +299,7 @@ def main():
     print(f"Base domain:  {args.domain_a}")
     print(f"Peer domain:  {args.domain_b}")
     print(f"Project root: {PROJECT_ROOT}")
+    print(f"Docker Compose: {' '.join(DOCKER_COMPOSE)}")
 
     try:
         if not args.skip_generate:

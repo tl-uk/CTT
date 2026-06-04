@@ -4,12 +4,12 @@
 }
 {\*\expandedcolortbl;;\cssrgb\c0\c0\c0\c90196;\cssrgb\c100000\c100000\c100000;\csgray\c79525;
 }
-\paperw11900\paperh16840\margl1440\margr1440\vieww14680\viewh6920\viewkind0
+\paperw11900\paperh16840\margl1440\margr1440\vieww19800\viewh9380\viewkind0
 \deftab720
 \pard\pardeftab720\sa320\partightenfactor0
 
 \f0\b\fs40 \cf2 \cb3 \expnd0\expndtw0\kerning0
-\outl0\strokewidth0 \strokec2 CTT Working Layers \'97 Terminal Workflow\
+CTT Working Layers \'97 Terminal Workflow\
 
 \itap1\trowd \taflags1 \trgaph108\trleft-108 \trbrdrt\brdrnil \trbrdrl\brdrnil \trbrdrr\brdrnil 
 \clvertalc \clshdrawnil \clbrdrt\brdrs\brdrw20\brdrcf4 \clbrdrl\brdrs\brdrw20\brdrcf4 \clbrdrb\brdrs\brdrw20\brdrcf4 \clbrdrr\brdrs\brdrw20\brdrcf4 \clpadl100 \clpadr100 \gaph\cellx1728
@@ -19,7 +19,7 @@
 \clvertalc \clshdrawnil \clbrdrt\brdrs\brdrw20\brdrcf4 \clbrdrl\brdrs\brdrw20\brdrcf4 \clbrdrb\brdrs\brdrw20\brdrcf4 \clbrdrr\brdrs\brdrw20\brdrcf4 \clpadl100 \clpadr100 \gaph\cellx8640
 \pard\intbl\itap1\pardeftab720\partightenfactor0
 
-\f1\b0\fs24 \cf0 \cb1 \kerning1\expnd0\expndtw0 \outl0\strokewidth0 Layer\cell 
+\f1\b0\fs24 \cf0 \cb1 \kerning1\expnd0\expndtw0 Layer\cell 
 \pard\intbl\itap1\pardeftab720\partightenfactor0
 \cf0 Service\cell 
 \pard\intbl\itap1\pardeftab720\partightenfactor0
@@ -167,7 +167,7 @@
 \pard\pardeftab720\sa320\partightenfactor0
 
 \f0\b\fs40 \cf2 \cb3 \expnd0\expndtw0\kerning0
-\outl0\strokewidth0 \strokec2 \
+\
 Native Development Workflow (for Debugging)\
 
 \itap1\trowd \taflags1 \trgaph108\trleft-108 \trbrdrt\brdrnil \trbrdrl\brdrnil \trbrdrr\brdrnil 
@@ -177,7 +177,7 @@ Native Development Workflow (for Debugging)\
 \clvertalc \clshdrawnil \clbrdrt\brdrs\brdrw20\brdrcf4 \clbrdrl\brdrs\brdrw20\brdrcf4 \clbrdrb\brdrs\brdrw20\brdrcf4 \clbrdrr\brdrs\brdrw20\brdrcf4 \clpadl100 \clpadr100 \gaph\cellx8640
 \pard\intbl\itap1\pardeftab720\partightenfactor0
 
-\f1\b0\fs24 \cf0 \cb1 \kerning1\expnd0\expndtw0 \outl0\strokewidth0 Step\cell 
+\f1\b0\fs24 \cf0 \cb1 \kerning1\expnd0\expndtw0 Step\cell 
 \pard\intbl\itap1\pardeftab720\partightenfactor0
 \cf0 Terminal\cell 
 \pard\intbl\itap1\pardeftab720\partightenfactor0
@@ -209,7 +209,12 @@ Native Development Workflow (for Debugging)\
 \pard\intbl\itap1\pardeftab720\partightenfactor0
 \cf0 **2**\cell 
 \pard\intbl\itap1\pardeftab720\partightenfactor0
-\cf0 `cd services/l2-bridge && source .venv/bin/activate && export PYTHONPATH="$(pwd)/../config:$(pwd)" && python dashboard.py`\cell 
+\cf0 `cd services/l2-bridge && source .venv/bin/activate && export PYTHONPATH="$(pwd)/../config:$(pwd)" && python dashboard.py`\
+\
+Or\
+\
+\pard\intbl\itap1\pardeftab720\partightenfactor0
+\cf0 make run-dashboard-bg\cell 
 \pard\intbl\itap1\pardeftab720\partightenfactor0
 \cf0 Start dashboard (REST on 5001)\cell \row
 
@@ -271,9 +276,8 @@ Native Development Workflow (for Debugging)\
 \pard\pardeftab720\sa320\partightenfactor0
 
 \f0\b\fs40 \cf2 \cb3 \expnd0\expndtw0\kerning0
-\outl0\strokewidth0 \strokec2 \
-\pard\pardeftab720\sa320\partightenfactor0
-\cf2 Cleanup & Health Check Workflow\
+\
+Cleanup & Health Check Workflow\
 
 \itap1\trowd \taflags1 \trgaph108\trleft-108 \trbrdrt\brdrnil \trbrdrl\brdrnil \trbrdrr\brdrnil 
 \clvertalc \clshdrawnil \clbrdrt\brdrs\brdrw20\brdrcf4 \clbrdrl\brdrs\brdrw20\brdrcf4 \clbrdrb\brdrs\brdrw20\brdrcf4 \clbrdrr\brdrs\brdrw20\brdrcf4 \clpadl100 \clpadr100 \gaph\cellx2880
@@ -281,7 +285,7 @@ Native Development Workflow (for Debugging)\
 \clvertalc \clshdrawnil \clbrdrt\brdrs\brdrw20\brdrcf4 \clbrdrl\brdrs\brdrw20\brdrcf4 \clbrdrb\brdrs\brdrw20\brdrcf4 \clbrdrr\brdrs\brdrw20\brdrcf4 \clpadl100 \clpadr100 \gaph\cellx8640
 \pard\intbl\itap1\pardeftab720\partightenfactor0
 
-\f1\b0\fs24 \cf0 \cb1 \kerning1\expnd0\expndtw0 \outl0\strokewidth0 Task\cell 
+\f1\b0\fs24 \cf0 \cb1 \kerning1\expnd0\expndtw0 Task\cell 
 \pard\intbl\itap1\pardeftab720\partightenfactor0
 \cf0 Command\cell 
 \pard\intbl\itap1\pardeftab720\partightenfactor0
@@ -388,6 +392,6 @@ Native Development Workflow (for Debugging)\
 \pard\pardeftab720\sa320\partightenfactor0
 
 \f0\b\fs40 \cf2 \cb3 \expnd0\expndtw0\kerning0
-\outl0\strokewidth0 \strokec2 \
+\
 \
 }

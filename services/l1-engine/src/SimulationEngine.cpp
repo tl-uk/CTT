@@ -368,8 +368,10 @@ void CTT::SimulationEngine::register_reflection() {
         .member<int>("jobs_dependent")
         .member<float>("deprivation_index")
         .member<float>("equity_exposure")
-        .member<bool>("serves_deprived_ward")
-        .member<std::string>("corridor_id");
+        .member<bool>("serves_deprived_ward");
+        // REMOVED: .member<std::string>("corridor_id");
+        // Flecs has no built-in serializer for std::string.
+        // DataBridge.cpp handles JSON serialization manually.
 }
 
 } // namespace CTT

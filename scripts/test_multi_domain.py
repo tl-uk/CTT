@@ -53,8 +53,19 @@ PROJECT_ROOT = Path(__file__).parent.parent
 COMPOSE_BASE = PROJECT_ROOT / "deploy" / "docker-compose.yml"
 GENERATOR = PROJECT_ROOT / "scripts" / "generate_domain_compose.py"
 
-# Detect Docker Compose command (v2 vs v1)
-DOCKER_COMPOSE = ["docker", "compose"] if shutil.which("docker") else ["docker-compose"]
+# Auto-detect Docker Compose command — prefers docker-compose (v1) if available
+# because v1 is more stable on Colima/macOS. Falls back to docker compose (v2).
+def _detect_docker_compose() -> list[str]:
+    """Return the correct Docker Compose command for this system."""
+    # Prefer v1 (docker-compose) — more stable on Colima/macOS
+    if shutil.which("docker-compose"):
+        return ["docker-compose"]
+    # Fallback to v2 (docker compose)
+    if shutil.which("docker"):
+        return ["docker", "compose"]
+    raise RuntimeError("Neither docker-compose nor docker compose found in PATH")
+
+DOCKER_COMPOSE = _detect_docker_compose()
 
 
 def get_compose_path(domain: str) -> Path:
@@ -98,17 +109,38 @@ def get_host_ports(domain: str) -> dict:
 # Helpers
 # =============================================================================
 
-def run(cmd: list[str], cwd: Path = PROJECT_ROOT, check: bool = True) -> subprocess.CompletedProcess:
+def run(cmd: list[str], cwd: Path = PROJECT_ROOT, check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
+    """Run a command. Use capture=False for long-running commands (e.g., docker build)
+    to stream output and avoid memory bloat/hangs."""
     print(f"[CMD] {' '.join(cmd)}")
-    result = subprocess.run(cmd, cwd=cwd, check=False, capture_output=True, text=True)
-    if check and result.returncode != 0:
-        print(f"[ERR] Command failed with exit code {result.returncode}")
-        if result.stdout:
-            print(f"[OUT] {result.stdout[:500]}")
-        if result.stderr:
-            print(f"[ERR] {result.stderr[:500]}")
-        raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
-    return result
+    if capture:
+        result = subprocess.run(cmd, cwd=cwd, check=False, capture_output=True, text=True)
+        if check and result.returncode != 0:
+            print(f"[ERR] Command failed with exit code {result.returncode}")
+            if result.stdout:
+                print(f"[OUT] {result.stdout[:500]}")
+            if result.stderr:
+                print(f"[ERR] {result.stderr[:500]}")
+            raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
+        return result
+    else:
+        # Stream output — for docker-compose up --build which can be huge
+        result = subprocess.run(cmd, cwd=cwd, check=False)
+        if check and result.returncode != 0:
+            raise subprocess.CalledProcessError(result.returncode, cmd)
+        return subprocess.CompletedProcess(cmd, result.returncode, stdout="", stderr="")
+
+
+def docker_images_exist(project_name: str) -> bool:
+    """Check if images for a project already exist (avoid redundant rebuilds)."""
+    result = subprocess.run(
+        ["docker", "images", "--format", "{{.Repository}}"],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        return False
+    # Look for any image tagged with this project
+    return project_name in result.stdout
 
 
 def health_check(domain: str, timeout: int = 120) -> dict:
@@ -184,18 +216,29 @@ def generate_domain(domain: str):
         raise RuntimeError(f"Generator failed to produce {compose_path}. Stderr: {result.stderr}")
     print(f"[GEN] OK: {compose_path}")
 
-def phase_bring_up(domain: str, is_base: bool = False):
+def phase_bring_up(domain: str, is_base: bool = False, force_build: bool = False):
     log_step(1 if is_base else 2, f"Bring up {domain}")
     if is_base:
         compose = COMPOSE_BASE
-        # FIX: Isolate base project to prevent cross-domain orphan killing
-        run(DOCKER_COMPOSE + ["-p", "ctt-dft", "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
-        run(DOCKER_COMPOSE + ["-p", "ctt-dft", "-f", str(compose), "up", "--build", "-d"])
+        project_name = "ctt-dft"
+        run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
+        # Use --no-build if images exist and force_build is False
+        if not force_build and docker_images_exist("ctt-engine"):
+            print(f"  [INFO] Existing images found for {project_name}, using --no-build")
+            run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "-d", "--no-build"], capture=False)
+        else:
+            print(f"  [INFO] Building images for {project_name} (this may take several minutes)...")
+            run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "--build", "-d"], capture=False)
     else:
         compose = get_compose_path(domain)
         project_name = domain.replace("domain-", "ctt-")
         run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
-        run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "--build", "-d"])
+        if not force_build and docker_images_exist("ctt-engine"):
+            print(f"  [INFO] Existing images found for {project_name}, using --no-build")
+            run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "-d", "--no-build"], capture=False)
+        else:
+            print(f"  [INFO] Building images for {project_name} (this may take several minutes)...")
+            run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "--build", "-d"], capture=False)
     data = health_check(domain)
     print(f"  [{domain}] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
 
@@ -241,7 +284,8 @@ def phase_reconnect(domain_b: str):
     log_step(7, f"Reconnect {domain_b} (simulate recovery)")
     compose = get_compose_path(domain_b)
     project_name = domain_b.replace("domain-", "ctt-")
-    run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "-d"])
+    # Reconnect uses --no-build since images already exist from phase_bring_up
+    run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "-d", "--no-build"])
     data = health_check(domain_b)
     print(f"  [{domain_b}] Recovered: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
 
@@ -293,6 +337,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="Leave stacks running after test")
     parser.add_argument("--skip-generate", action="store_true", help="Skip compose generation (use existing files)")
     parser.add_argument("--skip-base-rebuild", action="store_true", help="Skip tearing down/rebuilding domain-a (DfT)")
+    parser.add_argument("--force-build", action="store_true", help="Force image rebuild even if images exist")
     args = parser.parse_args()
 
     print(f"CTT Phase 6.5 — Multi-Stakeholder Federation E2E Test")
@@ -305,12 +350,12 @@ def main():
         if not args.skip_generate:
             phase_generate(args.domain_a, args.domain_b)
         if not args.skip_base_rebuild:
-            phase_bring_up(args.domain_a, is_base=True)
+            phase_bring_up(args.domain_a, is_base=True, force_build=args.force_build)
         else:
             print(f"\n[SKIP] Assuming {args.domain_a} is already running")
             data = health_check(args.domain_a, timeout=30)
             print(f"  [{args.domain_a}] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
-        phase_bring_up(args.domain_b)
+        phase_bring_up(args.domain_b, force_build=args.force_build)
         phase_verify_federation(args.domain_a, args.domain_b)
         phase_resilience_disconnect(args.domain_b)
         phase_verify_resilience(args.domain_a)

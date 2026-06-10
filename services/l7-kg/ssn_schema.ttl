@@ -1,0 +1,106 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix ctt: <https://ctt.dft.gov.uk/ontology/> .
+
+# =============================================================================
+# CTT SSN Ontology — Layer 7 Knowledge Graph Schema
+# =============================================================================
+# Based on W3C SSN (Semantic Sensor Network) with CTT-specific extensions
+# for agent autobiography, emergent learning, and cross-domain federation.
+# =============================================================================
+
+ctt:SSNRecord a owl:Class ;
+    rdfs:label "SSN Experience Record" ;
+    rdfs:comment """
+        A single observation of {System, Stimulus, Procedure, Result}.
+        Forms the atomic unit of an agent's searchable autobiography.
+    """ ;
+    rdfs:subClassOf owl:Thing .
+
+ctt:hasAgent a owl:ObjectProperty ;
+    rdfs:domain ctt:SSNRecord ;
+    rdfs:range ctt:Agent ;
+    rdfs:label "recorded by agent" .
+
+ctt:hasStimulus a owl:ObjectProperty ;
+    rdfs:domain ctt:SSNRecord ;
+    rdfs:range ctt:Stimulus ;
+    rdfs:label "observed stimulus" .
+
+ctt:hasProcedure a owl:ObjectProperty ;
+    rdfs:domain ctt:SSNRecord ;
+    rdfs:range ctt:Procedure ;
+    rdfs:label "applied procedure" .
+
+ctt:hasResult a owl:ObjectProperty ;
+    rdfs:domain ctt:SSNRecord ;
+    rdfs:range ctt:Result ;
+    rdfs:label "observed result" .
+
+ctt:hasSignature a owl:DatatypeProperty ;
+    rdfs:domain ctt:SSNRecord ;
+    rdfs:range xsd:string ;  # Base64-encoded 128-dim float32 vector
+    rdfs:label "semantic signature vector" .
+
+ctt:Agent a owl:Class ;
+    rdfs:label "CTT Agent" ;
+    rdfs:comment "A transport entity in the Flecs ECS (HGV, van, train, etc.)" .
+
+ctt:Stimulus a owl:Class ;
+    rdfs:label "Environmental Stimulus" ;
+    rdfs:comment """
+        The context in which a decision was made.
+        Includes: corridor_id, adversarial_pressure, energy_pct, time_of_day, etc.
+    """ .
+
+ctt:Procedure a owl:Class ;
+    rdfs:label "Agent Procedure" ;
+    rdfs:comment """
+        The action taken by the agent.
+        Examples: switch_mode(BEV), reroute(corridor), charge(station).
+    """ .
+
+ctt:Result a owl:Class ;
+    rdfs:label "Procedure Result" ;
+    rdfs:comment """
+        The outcome of applying the procedure.
+        Includes: success boolean, energy_delta, cost_delta, time_delta.
+    """ .
+
+ctt:OneShotSuccess a owl:Class ;
+    rdfs:label "One-Shot Success Event" ;
+    rdfs:subClassOf ctt:Result ;
+    rdfs:comment """
+        A special Result class indicating the first successful decarbonization
+        of an agent. Triggers satisfaction boost in BDI MindsetComponent.
+    """ .
+
+ctt:SocialAvalanche a owl:Class ;
+    rdfs:label "Social Avalanche Event" ;
+    rdfs:comment """
+        A population-level pattern detected by EmergentLearningModule.
+        Represents a cluster of simultaneous mindset shifts in a corridor.
+    """ ;
+    rdfs:subClassOf ctt:SSNRecord .
+
+ctt:hasClusterSize a owl:DatatypeProperty ;
+    rdfs:domain ctt:SocialAvalanche ;
+    rdfs:range xsd:integer ;
+    rdfs:label "number of agents in avalanche" .
+
+ctt:hasResonanceScore a owl:DatatypeProperty ;
+    rdfs:domain ctt:SocialAvalanche ;
+    rdfs:range xsd:float ;
+    rdfs:label "structural resonance score (0-1)" .
+
+ctt:recordedAt a owl:DatatypeProperty ;
+    rdfs:domain ctt:SSNRecord ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "UTC timestamp of observation" .
+
+ctt:inCorridor a owl:DatatypeProperty ;
+    rdfs:domain ctt:SSNRecord ;
+    rdfs:range xsd:string ;
+    rdfs:label "spatial corridor identifier" .

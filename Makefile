@@ -322,6 +322,16 @@ run-fusion-bg: ## Run fusion in background
 	@echo "⚡ Fusion backgrounded (log: /tmp/ctt_fusion.log)"
 	@$(call wait-for-port,5556,fusion)
 
+
+colima-status: ## Check Colima VM status and resource usage
+	@echo "🖥️  Colima Status"
+	@colima status 2>/dev/null || echo "❌ Colima not running. Start with: make colima-reset"
+	@echo ""
+	@echo "💾 Lima disk usage:"
+	@du -sh ~/.colima/_lima/_disks 2>/dev/null || echo "   (Lima disks not found)"
+	@echo ""
+	@make docker-df
+
 # =============================================================================
 # Colima reset
 # =============================================================================
@@ -489,6 +499,28 @@ compose-down-redpanda: ## Stop Redpanda variant stack
 
 compose-logs-redpanda: ## Tail Redpanda variant logs
 	@docker-compose -f $(COMPOSE_REDPANDA) logs -f
+
+
+# =============================================================================
+# Docker Diagnostics
+# =============================================================================
+
+docker-df: ## Show Docker disk usage (images, containers, volumes, build cache)
+	@echo "🐳 Docker Disk Usage Report"
+	@echo "═══════════════════════════════════════════════════════════════"
+	@docker system df
+	@echo ""
+	@echo "📊 Image breakdown (top 10 by size):"
+	@docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | sort -k3 -rh | head -10
+	@echo ""
+	@echo "🧹 Reclaimable space:"
+	@docker system df -v 2>/dev/null | grep -E "RECLAIMABLE|Images|Containers|Volumes|Build Cache" || docker system df
+
+docker-prune: ## Aggressive cleanup: remove dangling images, stopped containers, unused volumes
+	@echo "🧹 Pruning Docker system..."
+	@docker system prune -a --volumes -f
+	@echo "✅ Prune complete"
+	@make docker-df
 
 # =============================================================================
 # Global Utilities

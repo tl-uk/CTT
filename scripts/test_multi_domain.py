@@ -2,21 +2,19 @@
 """
 scripts/test_multi_domain.py
 
-CTT Phase 6.5 — Multi-Stakeholder Federation E2E Test
+CTT Phase 9 — Multi-Stakeholder Federation E2E Test (Docker-Only)
 
 Validates plug-and-use resilience across two independent CTT domains.
 Uses scripts/generate_domain_compose.py to render compose files on-the-fly.
 
+CRITICAL (Phase 9): This test is DOCKER-ONLY. Native mode is NOT supported
+for multi-domain E2E because ZMQ addressing (host.docker.internal vs localhost)
+and port offsets are only consistent inside the Docker network bridge.
+For native single-domain testing, use: make test-e2e
+
 Port semantics:
   - Host (external) ports = BASE + offset  (used for REST probes, curls)
   - Container (internal) ports = BASE     (services hardcode bind addresses)
-
-Architectural note (Phase 6.5):
-  Host-side ZMQ PUB/SUB probing is unreliable on Docker Desktop macOS because
-  the VM boundary user-space proxy does not forward ZMQ subscription handshakes.
-  This test verifies telemetry at the REST application layer (dashboard /health),
-  which already consumes ZMQ internally. ZMQ probes are retained for tactical
-  policy verification (optional) and Linux CI/CD environments.
 
 Test sequence:
   1. Generate compose for domain-a and domain-b from domains.yaml
@@ -32,7 +30,7 @@ Test sequence:
 Usage:
     python scripts/test_multi_domain.py --domain-a domain-dft --domain-b domain-dhl [--keep]
 
-Requires: Docker Compose v2, Python 3.10+, requests, zmq
+Requires: Docker Compose v2, Python 3.10+, requests, zmq, Colima or Docker Desktop
 """
 import argparse
 import json
@@ -57,10 +55,8 @@ GENERATOR = PROJECT_ROOT / "scripts" / "generate_domain_compose.py"
 # because v1 is more stable on Colima/macOS. Falls back to docker compose (v2).
 def _detect_docker_compose() -> list[str]:
     """Return the correct Docker Compose command for this system."""
-    # Prefer v1 (docker-compose) — more stable on Colima/macOS
     if shutil.which("docker-compose"):
         return ["docker-compose"]
-    # Fallback to v2 (docker compose)
     if shutil.which("docker"):
         return ["docker", "compose"]
     raise RuntimeError("Neither docker-compose nor docker compose found in PATH")
@@ -73,17 +69,12 @@ def get_compose_path(domain: str) -> Path:
 
 
 def get_host_ports(domain: str) -> dict:
-    """Return HOST (external) port numbers for probing from the Docker host.
-
-    Container ports remain at base values; only host-side mappings shift.
-    """
-    # Try to read offset from domains.yaml
+    """Return HOST (external) port numbers for probing from the Docker host."""
     try:
         domains_file = PROJECT_ROOT / "services" / "config" / "domains.yaml"
         if domains_file.exists():
             text = domains_file.read_text()
             import re
-            # Find port_offset under this domain block
             pattern = rf"{re.escape(domain)}:\s*\n(?:\s+.*\n)*?\s+port_offset:\s*(\d+)"
             match = re.search(pattern, text)
             if match:
@@ -110,8 +101,7 @@ def get_host_ports(domain: str) -> dict:
 # =============================================================================
 
 def run(cmd: list[str], cwd: Path = PROJECT_ROOT, check: bool = True, capture: bool = True) -> subprocess.CompletedProcess:
-    """Run a command. Use capture=False for long-running commands (e.g., docker build)
-    to stream output and avoid memory bloat/hangs."""
+    """Run a command. Use capture=False for long-running commands."""
     print(f"[CMD] {' '.join(cmd)}")
     if capture:
         result = subprocess.run(cmd, cwd=cwd, check=False, capture_output=True, text=True)
@@ -124,7 +114,6 @@ def run(cmd: list[str], cwd: Path = PROJECT_ROOT, check: bool = True, capture: b
             raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
         return result
     else:
-        # Stream output — for docker-compose up --build which can be huge
         result = subprocess.run(cmd, cwd=cwd, check=False)
         if check and result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, cmd)
@@ -132,14 +121,13 @@ def run(cmd: list[str], cwd: Path = PROJECT_ROOT, check: bool = True, capture: b
 
 
 def docker_images_exist(project_name: str) -> bool:
-    """Check if images for a project already exist (avoid redundant rebuilds)."""
+    """Check if images for a project already exist."""
     result = subprocess.run(
         ["docker", "images", "--format", "{{.Repository}}"],
         capture_output=True, text=True
     )
     if result.returncode != 0:
         return False
-    # Look for any image tagged with this project
     return project_name in result.stdout
 
 
@@ -162,11 +150,7 @@ def health_check(domain: str, timeout: int = 120) -> dict:
 
 def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 5000) -> bool:
     """Try to receive at least one message from a ZMQ PUB socket.
-
-    NOTE: This is unreliable on Docker Desktop macOS due to VM boundary
-    limitations with ZMQ subscription handshakes. Use only for tactical policy
-    probes (optional) or in Linux CI/CD environments.
-    """
+    NOTE: Unreliable on Docker Desktop macOS. Use for Linux CI/CD only."""
     ctx = zmq.Context()
     sub = ctx.socket(zmq.SUB)
     sub.setsockopt(zmq.RCVTIMEO, timeout_ms)
@@ -174,7 +158,6 @@ def zmq_probe(addr: str, topic: str = "", timeout_ms: int = 5000) -> bool:
     sub.setsockopt_string(zmq.SUBSCRIBE, topic)
     try:
         sub.connect(addr)
-        # Slow-joiner guard: allow subscription handshake to complete
         time.sleep(0.3)
         msg = sub.recv()
         return True
@@ -192,6 +175,33 @@ def log_step(step: int, desc: str):
     print(f"\n{'='*60}")
     print(f"STEP {step}: {desc}")
     print(f"{'='*60}")
+
+
+# =============================================================================
+# Docker / Colima Verification
+# =============================================================================
+
+def verify_docker_ready():
+    """Ensure Docker daemon is running and healthy."""
+    print("\n[DOCKER] Verifying Docker daemon...")
+    result = subprocess.run(["docker", "info"], capture_output=True, text=True)
+    if result.returncode != 0:
+        print("❌ Docker daemon is not running.")
+        print("")
+        print("   If you use Colima:")
+        print("      colima start --cpu 4 --memory 8")
+        print("")
+        print("   If you use Docker Desktop:")
+        print("      Open Docker Desktop and wait for the whale icon.")
+        print("")
+        raise RuntimeError("Docker daemon not available")
+
+    # Check disk space
+    df_result = subprocess.run(["docker", "system", "df"], capture_output=True, text=True)
+    if df_result.returncode == 0:
+        print(f"[DOCKER] {df_result.stdout.strip()}")
+
+    print("✅ Docker daemon is ready")
 
 
 # =============================================================================
@@ -216,39 +226,33 @@ def generate_domain(domain: str):
         raise RuntimeError(f"Generator failed to produce {compose_path}. Stderr: {result.stderr}")
     print(f"[GEN] OK: {compose_path}")
 
+
 def phase_bring_up(domain: str, is_base: bool = False, force_build: bool = False):
     log_step(1 if is_base else 2, f"Bring up {domain}")
     if is_base:
         compose = COMPOSE_BASE
         project_name = "ctt-dft"
-        run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
-        # Use --no-build if images exist and force_build is False
-        if not force_build and docker_images_exist("ctt-engine"):
-            print(f"  [INFO] Existing images found for {project_name}, using --no-build")
-            run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "-d", "--no-build"], capture=False)
-        else:
-            print(f"  [INFO] Building images for {project_name} (this may take several minutes)...")
-            run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "--build", "-d"], capture=False)
     else:
         compose = get_compose_path(domain)
         project_name = domain.replace("domain-", "ctt-")
-        run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
-        if not force_build and docker_images_exist("ctt-engine"):
-            print(f"  [INFO] Existing images found for {project_name}, using --no-build")
-            run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "-d", "--no-build"], capture=False)
-        else:
-            print(f"  [INFO] Building images for {project_name} (this may take several minutes)...")
-            run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "--build", "-d"], capture=False)
+
+    # Always down first to ensure clean state
+    run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
+
+    # Use --no-build if images exist and force_build is False
+    if not force_build and docker_images_exist("ctt-engine"):
+        print(f"  [INFO] Existing images found for {project_name}, using --no-build")
+        run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "-d", "--no-build"], capture=False)
+    else:
+        print(f"  [INFO] Building images for {project_name} (this may take several minutes)...")
+        run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "--build", "-d"], capture=False)
+
     data = health_check(domain)
     print(f"  [{domain}] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
 
-def phase_verify_federation(domain_a: str, domain_b: str):
-    """Phase 6.5: Verify telemetry via REST (dashboard already consumes ZMQ).
 
-    Host-side ZMQ probing is unreliable on Docker Desktop macOS because the
-    VM boundary user-space proxy does not forward ZMQ SUB subscription
-    handshakes. We verify at the application layer instead.
-    """
+def phase_verify_federation(domain_a: str, domain_b: str):
+    """Phase 9: Verify telemetry via REST (dashboard consumes ZMQ internally)."""
     log_step(3, "Verify telemetry streams on both domains (REST-based)")
     for domain in (domain_a, domain_b):
         data = health_check(domain, timeout=30)
@@ -284,13 +288,14 @@ def phase_reconnect(domain_b: str):
     log_step(7, f"Reconnect {domain_b} (simulate recovery)")
     compose = get_compose_path(domain_b)
     project_name = domain_b.replace("domain-", "ctt-")
-    # Reconnect uses --no-build since images already exist from phase_bring_up
+    # Reconnect uses --no-build since images already exist
     run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "-d", "--no-build"])
     data = health_check(domain_b)
     print(f"  [{domain_b}] Recovered: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
 
+
 def phase_verify_post_reconnect(domain_a: str, domain_b: str):
-    """Phase 6.5: Verify federation resumed via REST health check."""
+    """Phase 9: Verify federation resumed via REST health check."""
     log_step(8, "Verify federation resumes after reconnect")
     for domain in (domain_a, domain_b):
         data = health_check(domain, timeout=60)
@@ -320,7 +325,6 @@ def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
         project_name_a = domain_a.replace("domain-", "ctt-")
         run(DOCKER_COMPOSE + ["-p", project_name_a, "-f", str(get_compose_path(domain_a)), "down", "--volumes", "--remove-orphans"], check=False)
     else:
-        # Base domain also needs project isolation to prevent cross-domain orphan killing
         run(DOCKER_COMPOSE + ["-p", "ctt-dft", "-f", str(COMPOSE_BASE), "down", "--volumes", "--remove-orphans"], check=False)
 
     print("[OK] All stacks torn down")
@@ -331,36 +335,44 @@ def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
 # =============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="CTT Multi-Stakeholder Federation E2E Test")
+    parser = argparse.ArgumentParser(
+        description="CTT Multi-Stakeholder Federation E2E Test (Docker-Only)",
+        epilog="NOTE: This test requires Docker. For native single-domain testing, use: make test-e2e"
+    )
     parser.add_argument("--domain-a", default="domain-dft", help="Base domain (default: domain-dft)")
     parser.add_argument("--domain-b", required=True, help="Peer domain (e.g., domain-dhl, domain-tesco)")
     parser.add_argument("--keep", action="store_true", help="Leave stacks running after test")
     parser.add_argument("--skip-generate", action="store_true", help="Skip compose generation (use existing files)")
-    parser.add_argument("--skip-base-rebuild", action="store_true", help="Skip tearing down/rebuilding domain-a (DfT)")
     parser.add_argument("--force-build", action="store_true", help="Force image rebuild even if images exist")
     args = parser.parse_args()
 
-    print(f"CTT Phase 6.5 — Multi-Stakeholder Federation E2E Test")
+    print(f"CTT Phase 9 — Multi-Stakeholder Federation E2E Test (Docker-Only)")
     print(f"Base domain:  {args.domain_a}")
     print(f"Peer domain:  {args.domain_b}")
     print(f"Project root: {PROJECT_ROOT}")
     print(f"Docker Compose: {' '.join(DOCKER_COMPOSE)}")
+    print("")
+    print("⚠️  IMPORTANT: This test is DOCKER-ONLY. Native mode is not supported")
+    print("   for multi-domain E2E due to ZMQ addressing inconsistencies.")
+    print("")
 
     try:
+        # Phase 9: Verify Docker is ready before starting
+        verify_docker_ready()
+
         if not args.skip_generate:
             phase_generate(args.domain_a, args.domain_b)
-        if not args.skip_base_rebuild:
-            phase_bring_up(args.domain_a, is_base=True, force_build=args.force_build)
-        else:
-            print(f"\n[SKIP] Assuming {args.domain_a} is already running")
-            data = health_check(args.domain_a, timeout=30)
-            print(f"  [{args.domain_a}] Healthy: {data['agents_online']} agents, telemetry_flowing={data['telemetry_flowing']}")
+
+        # Always bring up both domains in Docker — no hybrid mode
+        phase_bring_up(args.domain_a, is_base=True, force_build=args.force_build)
         phase_bring_up(args.domain_b, force_build=args.force_build)
+
         phase_verify_federation(args.domain_a, args.domain_b)
         phase_resilience_disconnect(args.domain_b)
         phase_verify_resilience(args.domain_a)
         phase_reconnect(args.domain_b)
         phase_verify_post_reconnect(args.domain_a, args.domain_b)
+
         print("\n" + "="*60)
         print("ALL TESTS PASSED — Plug-and-use resilience demonstrated")
         print("="*60)

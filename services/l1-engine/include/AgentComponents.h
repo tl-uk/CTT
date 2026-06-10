@@ -1,4 +1,4 @@
-// services/l1-engine/include/AgentComponents.hpp
+// services/l1-engine/include/AgentComponents.h
 /**
  * @file AgentComponents.hpp
  * @brief Data structures, enumerations, and tags for the Cognitive Transit Twin (CTT).

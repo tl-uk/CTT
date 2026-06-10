@@ -56,3 +56,7 @@ data/
 *.hdf5
 
 # Keep: src/, include/, CMakeLists.txt, Dockerfile, api/proto/
+
+# Logs
+*.log
+/tmp/

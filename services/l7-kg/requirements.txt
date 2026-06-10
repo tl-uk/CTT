@@ -1,0 +1,4 @@
+# L7 Knowledge Graph — Python dependencies
+numpy>=1.24.0
+scikit-learn>=1.3.0
+pyzmq>=25.0.0

@@ -478,7 +478,22 @@ df -h /Users\
 cd /Users/theo/Dev/CTT\
 python scripts/test_multi_domain_fixed.py --domain-b domain-dhl --keep --skip-base-rebuild\cell 
 \pard\intbl\itap1\pardeftab720\partightenfactor0
-\cf0 Workflow for E2E Test with Docker Compose, but avoid rebuild bloat\cell \row
+\cf0 Workflow for E2E Test with Docker Compose, but avoid rebuild bloat\
+\
+# Normal run (uses layer cache, prunes dangling images before build):\
+python scripts/test_multi_domain.py --domain-a domain-dft --domain-b domain-dhl --keep\
+\
+# With post-test cleanup:\
+python scripts/test_multi_domain.py --domain-a domain-dft --domain-b domain-dhl --prune\
+\
+# Only when you MUST rebuild from scratch:\
+python scripts/test_multi_domain.py --domain-a domain-dft --domain-b domain-dhl --force-build --prune\
+\
+# Aggressive cleanup (stops containers, removes ALL unused images):\
+docker system prune -a --volumes -f\
+\
+# Or more surgical \'97 just dangling images:\
+docker image prune -f\cell \row
 
 \itap1\trowd \taflags1 \trgaph108\trleft-108 \trbrdrl\brdrnil \trbrdrt\brdrnil \trbrdrr\brdrnil 
 \clvertalc \clshdrawnil \clbrdrt\brdrs\brdrw20\brdrcf5 \clbrdrl\brdrs\brdrw20\brdrcf5 \clbrdrb\brdrs\brdrw20\brdrcf5 \clbrdrr\brdrs\brdrw20\brdrcf5 \clpadl100 \clpadr100 \gaph\cellx2880

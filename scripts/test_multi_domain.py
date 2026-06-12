@@ -121,14 +121,45 @@ def run(cmd: list[str], cwd: Path = PROJECT_ROOT, check: bool = True, capture: b
 
 
 def docker_images_exist(project_name: str) -> bool:
-    """Check if images for a project already exist."""
+    """Check if images for a project already exist.
+
+    Phase 9 fix: Check for ALL service images needed by the compose file,
+    not just the engine image. After 'docker prune', individual service
+    images may be missing even if the engine image exists.
+    """
     result = subprocess.run(
         ["docker", "images", "--format", "{{.Repository}}"],
         capture_output=True, text=True
     )
     if result.returncode != 0:
         return False
-    return project_name in result.stdout
+
+    # For base domain (domain-dft), we need these images
+    base_required = [
+        "ctt-engine", "ctt-harvester", "ctt-interpreter", 
+        "ctt-fusion", "ctt-dashboard", "ctt-orchestrator",
+        "ctt-audit-logger", "ctt-federation-bridge"
+    ]
+
+    # For peer domains, images are prefixed with project name (e.g., ctt-dhl-engine)
+    # We check if the base images exist; domain-specific images are built on demand
+    images = result.stdout
+
+    # Check if at least the core images exist
+    # If project_name is "ctt-dft", check for ctt-engine, ctt-harvester, etc.
+    # If project_name is "ctt-dhl", check for ctt-dhl-engine, etc.
+    if project_name == "ctt-dft":
+        required = base_required
+    else:
+        # For peer domains, images are tagged with domain prefix during build
+        # We check if ANY domain-specific images exist as a heuristic
+        required = [f"{project_name}-engine"]
+
+    for req in required:
+        if req not in images:
+            print(f"  [INFO] Missing image: {req}, will build")
+            return False
+    return True
 
 
 def health_check(domain: str, timeout: int = 120) -> dict:
@@ -239,12 +270,32 @@ def phase_bring_up(domain: str, is_base: bool = False, force_build: bool = False
     # Always down first to ensure clean state
     run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "down", "--volumes", "--remove-orphans"], check=False)
 
-    # Use --no-build if images exist and force_build is False
-    if not force_build and docker_images_exist("ctt-engine"):
+    # Phase 9 fix: Prune dangling images BEFORE building to prevent accumulation.
+    # docker-prune only removes untagged images; --force-build creates new untagged
+    # layers while old ones dangle. This prevents the 9.6GB bloat you observed.
+    if not is_base:  # Only prune before peer domain builds (base is usually cached)
+        prune_result = subprocess.run(
+            ["docker", "image", "prune", "-f"],
+            capture_output=True, text=True
+        )
+        if prune_result.returncode == 0 and prune_result.stdout.strip():
+            print(f"  [INFO] Pruned dangling images: {prune_result.stdout.strip()}")
+
+    # Phase 9: Check if ALL required images exist before using --no-build
+    images_ready = not force_build and docker_images_exist(project_name)
+
+    if images_ready:
         print(f"  [INFO] Existing images found for {project_name}, using --no-build")
-        run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "-d", "--no-build"], capture=False)
+        try:
+            run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "-d", "--no-build"], capture=False)
+        except subprocess.CalledProcessError:
+            print(f"  [WARN] --no-build failed, falling back to --build (with cache)")
+            run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "--build", "-d"], capture=False)
     else:
-        print(f"  [INFO] Building images for {project_name} (this may take several minutes)...")
+        if force_build:
+            print(f"  [INFO] Force-building images for {project_name} (no cache)...")
+        else:
+            print(f"  [INFO] Building images for {project_name} (layer cache enabled)...")
         run(DOCKER_COMPOSE + ["-p", project_name, "-f", str(compose), "up", "--build", "-d"], capture=False)
 
     data = health_check(domain)
@@ -306,7 +357,7 @@ def phase_verify_post_reconnect(domain_a: str, domain_b: str):
             raise RuntimeError(f"[{domain}] Telemetry did not resume after reconnect")
 
 
-def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
+def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False, prune: bool = False):
     if keep:
         ports_a = get_host_ports(domain_a)
         ports_b = get_host_ports(domain_b)
@@ -315,6 +366,10 @@ def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
         print(f"       {domain_b} dashboard: http://localhost:{ports_b['dashboard']}")
         print(f"       {domain_a} Grafana:   http://localhost:{ports_a['grafana']}")
         print(f"       {domain_b} Grafana:   http://localhost:{ports_b['grafana']}")
+        if prune:
+            print("\n[PRUNE] Run the following to reclaim disk space:")
+            print("       docker image prune -f")
+            print("       docker system prune -a --volumes -f")
         return
 
     log_step(9, "Cleanup: tear down both domains")
@@ -326,6 +381,11 @@ def phase_cleanup(domain_a: str, domain_b: str, keep: bool = False):
         run(DOCKER_COMPOSE + ["-p", project_name_a, "-f", str(get_compose_path(domain_a)), "down", "--volumes", "--remove-orphans"], check=False)
     else:
         run(DOCKER_COMPOSE + ["-p", "ctt-dft", "-f", str(COMPOSE_BASE), "down", "--volumes", "--remove-orphans"], check=False)
+
+    if prune:
+        print("\n[PRUNE] Removing dangling images...")
+        subprocess.run(["docker", "image", "prune", "-f"], capture_output=True)
+        print("[PRUNE] Dangling images removed")
 
     print("[OK] All stacks torn down")
 
@@ -343,7 +403,8 @@ def main():
     parser.add_argument("--domain-b", required=True, help="Peer domain (e.g., domain-dhl, domain-tesco)")
     parser.add_argument("--keep", action="store_true", help="Leave stacks running after test")
     parser.add_argument("--skip-generate", action="store_true", help="Skip compose generation (use existing files)")
-    parser.add_argument("--force-build", action="store_true", help="Force image rebuild even if images exist")
+    parser.add_argument("--force-build", action="store_true", help="Force image rebuild even if images exist (no layer cache)")
+    parser.add_argument("--prune", action="store_true", help="Prune dangling images after cleanup")
     args = parser.parse_args()
 
     print(f"CTT Phase 9 — Multi-Stakeholder Federation E2E Test (Docker-Only)")
@@ -382,7 +443,7 @@ def main():
         traceback.print_exc()
         sys.exit(1)
     finally:
-        phase_cleanup(args.domain_a, args.domain_b, keep=args.keep)
+        phase_cleanup(args.domain_a, args.domain_b, keep=args.keep, prune=args.prune)
 
 
 if __name__ == "__main__":

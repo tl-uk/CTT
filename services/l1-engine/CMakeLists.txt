@@ -10,7 +10,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # --- Force old fetched dependencies to work with modern CMake ---
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
-# --- Suppress ranlib "no symbols" warnings on macOS ---
+# =============================================================================
+# Phase 11: Build Performance Optimizations
+# =============================================================================
+# ccache: speeds up rebuilds during iterative L7-KG development
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    message(STATUS "ccache found: ${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+    set(CMAKE_C_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
+    # ccache needs sloppiness for pch and modules
+    set(ENV{CCACHE_SLOPPINESS} "pch_defines,time_macros,include_file_mtime,include_file_ctime")
+else()
+    message(STATUS "ccache not found — install with: brew install ccache (macOS) or apt install ccache (Linux)")
+endif()
+
+# =============================================================================
+# Suppress ranlib "no symbols" warnings on macOS
+# =============================================================================
 if(APPLE)
     set(CMAKE_C_ARCHIVE_FINISH   "<CMAKE_RANLIB> -no_warning_for_no_symbols <TARGET>")
     set(CMAKE_CXX_ARCHIVE_FINISH "<CMAKE_RANLIB> -no_warning_for_no_symbols <TARGET>")
@@ -18,9 +35,9 @@ endif()
 
 include(FetchContent)
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # 0. Apple Silicon / Homebrew Auto-Detection
-# -----------------------------------------------------------------------------
+# =============================================================================
 if(APPLE AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm64")
     message(STATUS "Apple Silicon detected. Adding /opt/homebrew to search paths.")
     list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
@@ -30,20 +47,23 @@ if(APPLE AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm64")
     if(EXISTS "/opt/homebrew/opt/zeromq")
         list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/zeromq")
     endif()
+    if(EXISTS "/opt/homebrew/opt/ccache")
+        list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/ccache")
+    endif()
 endif()
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # 1. Flecs Global Configuration
-# -----------------------------------------------------------------------------
+# =============================================================================
 set(FLECS_REST ON CACHE BOOL "Enable Flecs REST API" FORCE)
 # v4: monitor addon renamed to stats
 set(FLECS_STATS ON CACHE BOOL "Enable Flecs Stats Module" FORCE)
 set(FLECS_SYSTEM ON CACHE BOOL "Enable Flecs System Module" FORCE)
 set(FLECS_CPP ON CACHE BOOL "Enable Flecs C++ API" FORCE)
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # 2. Dependencies
-# -----------------------------------------------------------------------------
+# =============================================================================
 find_package(Threads REQUIRED)
 
 # Hardened nlohmann_json: Try local first, then fetch
@@ -70,7 +90,7 @@ if(NOT ZeroMQ_FOUND)
         if(APPLE AND EXISTS "/opt/homebrew/opt/zeromq/lib/pkgconfig")
             set(ENV{PKG_CONFIG_PATH} "/opt/homebrew/opt/zeromq/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
         endif()
-        
+
         pkg_check_modules(ZeroMQ QUIET libzmq)
     endif()
 endif()
@@ -110,9 +130,9 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cppzmq)
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # Protobuf Generation
-# -----------------------------------------------------------------------------
+# =============================================================================
 find_package(Protobuf REQUIRED)
 
 set(PROTO_FILE ${CMAKE_CURRENT_SOURCE_DIR}/../../api/proto/ctt_messages.proto)
@@ -141,9 +161,24 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(flecs)
 
-# -----------------------------------------------------------------------------
-# 3. Target Definition
-# -----------------------------------------------------------------------------
+# =============================================================================
+# 3. Include Directories
+# =============================================================================
+# Phase 11: Added L7-KG include path for SSN_Experience_Component
+set(CTT_INCLUDE_DIRS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../l7-kg/include
+    ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+message(STATUS "CTT include directories:")
+foreach(dir ${CTT_INCLUDE_DIRS})
+    message(STATUS "  ${dir}")
+endforeach()
+
+# =============================================================================
+# 4. Target Definition
+# =============================================================================
 add_executable(CTT_Engine
     src/main.cpp
     src/SimulationEngine.cpp
@@ -153,20 +188,61 @@ add_executable(CTT_Engine
 
 add_dependencies(CTT_Engine ctt_proto_gen)
 
-target_include_directories(CTT_Engine PRIVATE 
-    include 
-    ${CMAKE_CURRENT_BINARY_DIR}
-)
+target_include_directories(CTT_Engine PRIVATE ${CTT_INCLUDE_DIRS})
 
 # Suppress C++20 deprecated-literal-operator warnings from cppzmq headers
 target_compile_options(CTT_Engine PRIVATE 
     $<$<CXX_COMPILER_ID:AppleClang,Clang,GNU>:-Wno-deprecated-literal-operator>
 )
 
+# =============================================================================
+# 5. Precompiled Headers (CMake 3.16+)
+# Phase 11: Speed up iterative rebuilds during L7-KG development
+# =============================================================================
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.16")
+    # Precompile stable third-party headers that rarely change
+    # This significantly speeds up rebuilds when modifying SimulationEngine.cpp
+    target_precompile_headers(CTT_Engine PRIVATE
+        <array>
+        <cstdint>
+        <string>
+        <vector>
+        <mutex>
+        <atomic>
+        <chrono>
+        <thread>
+        <random>
+        <cmath>
+        <iostream>
+        <nlohmann/json.hpp>
+    )
+    message(STATUS "Precompiled headers enabled (CMake >= 3.16)")
+else()
+    message(STATUS "Precompiled headers disabled (CMake < 3.16)")
+endif()
+
+# =============================================================================
+# 6. Link Libraries
+# =============================================================================
 target_link_libraries(CTT_Engine PRIVATE 
     flecs
     nlohmann_json::nlohmann_json 
     cppzmq
     Threads::Threads
     protobuf::libprotobuf
+)
+
+# =============================================================================
+# 7. Installation & Packaging
+# =============================================================================
+install(TARGETS CTT_Engine
+    RUNTIME DESTINATION bin
+)
+
+install(FILES 
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/AgentComponents.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/DataBridge.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/SimulationEngine.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../l7-kg/include/ssn_experience_component.h
+    DESTINATION include/ctt
 )

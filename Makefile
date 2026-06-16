@@ -1,18 +1,20 @@
 # =============================================================================
 # CTT Project — Cross-Platform Build Orchestration (macOS / Linux / Docker)
+# Phase 11: Docker Bake integration, cache-efficient builds, disk management
 # =============================================================================
 
-.PHONY: help all check-deps configure-engine build-engine run-engine run-engine-fast \
-        run-engine-bg clean-engine setup-python setup-l3 run-dashboard run-dashboard-bg \
-        run-explorer run-explorer-bg \
-        run-harvester run-interpreter run-fusion \
-        run-harvester-bg run-interpreter-bg run-fusion-bg \
-        test-bridge test-e2e test-pipeline stop-pipeline stop-native healthcheck \
-        check-ports proto proto-clean fmt-engine lint-engine docker-engine \
-        compose-build compose-up compose-down compose-logs compose-ps
+.PHONY: help all check-deps configure-engine build-engine run-engine run-engine-fast         run-engine-bg clean-engine setup-python setup-l3 run-dashboard run-dashboard-bg         run-explorer run-explorer-bg         run-harvester run-interpreter run-fusion         run-harvester-bg run-interpreter-bg run-fusion-bg         test-bridge test-e2e test-pipeline stop-pipeline stop-native healthcheck         check-ports proto proto-clean fmt-engine lint-engine docker-engine         compose-build compose-up compose-down compose-logs compose-ps         bake-build bake-list bake-prune docker-compact colima-compact         compose-up-bake compose-up-kg test-multi-domain
 
 # Detect CPU cores for parallel builds
 NPROCS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
+# =============================================================================
+# Phase 11: Git-SHA Image Tagging (prevents dangling accumulation)
+# =============================================================================
+GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+CTT_IMAGE_TAG ?= $(GIT_SHA)
+BAKE_FILE := docker-bake.hcl
+CACHE_DIR := /tmp/ctt-docker-cache
 
 # =============================================================================
 # Service directories
@@ -26,6 +28,7 @@ L2_DIR     := services/l2-bridge
 L3_DIR     := services/l3-analytics
 L4_DIR     := services/l4-spatial
 L5_DIR     := services/l5-macro
+L7_DIR     := services/l7-kg
 BUILD_DIR  := $(L1_DIR)/build
 CONFIG_DIR := services/config
 
@@ -66,8 +69,17 @@ help: ## Show this help message
 	@echo "║           CTT Project — Build & Run Commands                 ║"
 	@echo "╚══════════════════════════════════════════════════════════════╝"
 	@echo ""
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
+	@echo "═══ Native Build ═══"
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}' | grep -E "(check-deps|build-engine|run-engine|setup-python|setup-l3|setup-l5|setup-l7)"
+	@echo ""
+	@echo "═══ Docker / Bake (Phase 11) ═══"
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}' | grep -E "(bake-|docker-|compose-|colima-)"
+	@echo ""
+	@echo "═══ Testing ═══"
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}' | grep -E "(test-|healthcheck|check-ports)"
+	@echo ""
+	@echo "═══ Disk Management ═══"
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}' | grep -E "(prune|compact|nuke|df)"
 	@echo ""
 	@echo "Quick start (native):"
 	@echo "  1. make check-deps     → Verify dependencies"
@@ -76,9 +88,15 @@ help: ## Show this help message
 	@echo "  4. make setup-python   → Prepare L2 Bridge environment"
 	@echo "  5. make test-e2e       → Verify full pipeline"
 	@echo ""
-	@echo "Docker:"
-	@echo "  make docker-engine     → Build L1 Engine Docker image"
-	@echo "  docker compose up      → Launch full stack (requires docker-compose.yml)"
+	@echo "Docker / Bake (cache-efficient):"
+	@echo "  make bake-build        → Build all services via docker-bake.hcl"
+	@echo "  make compose-up-bake   → Launch full stack with baked images"
+	@echo "  make test-multi-domain → Run multi-domain E2E with smart builds"
+	@echo ""
+	@echo "Disk management:"
+	@echo "  make docker-df         → Show disk usage"
+	@echo "  make docker-compact    → Compact Colima VM disk (non-destructive)"
+	@echo "  make colima-nuke       → Nuclear reset (destructive, reclaims all)"
 	@echo ""
 
 # =============================================================================
@@ -86,26 +104,97 @@ help: ## Show this help message
 # =============================================================================
 
 define check-port-free
-	@if lsof -i :$(1) >/dev/null 2>&1; then \
-		echo "❌ Port $(1) already in use. Run 'make stop-native' first."; \
-		exit 1; \
-	else \
-		echo "✅ Port $(1) is free for $(2)"; \
-	fi
+	@if lsof -i :$(1) >/dev/null 2>&1; then 		echo "❌ Port $(1) already in use. Run 'make stop-native' first."; 		exit 1; 	else 		echo "✅ Port $(1) is free for $(2)"; 	fi
 endef
 
 define wait-for-port
 	@echo "⏳ Waiting for $(2) to bind port $(1)..."
-	@for i in $$(seq 1 25); do \
-		if nc -z localhost $(1) 2>/dev/null; then \
-			echo "✅ $(2) is listening on $(1)"; \
-			exit 0; \
-		fi; \
-		sleep 0.2; \
-	done; \
-	echo "❌ $(2) failed to bind port $(1) within 5s"; \
-	exit 1
+	@for i in $$(seq 1 25); do 		if nc -z localhost $(1) 2>/dev/null; then 			echo "✅ $(2) is listening on $(1)"; 			exit 0; 		fi; 		sleep 0.2; 	done; 	echo "❌ $(2) failed to bind port $(1) within 5s"; 	exit 1
 endef
+
+# =============================================================================
+# Phase 11: Docker Bake Targets (Cache-Efficient Builds)
+# =============================================================================
+
+bake-list: ## List all bake targets and groups
+	@echo "📋 Docker Bake targets:"
+	@docker buildx bake -f $(BAKE_FILE) --list=targets 2>/dev/null || 		echo "   (docker buildx not available or bake file missing)"
+
+bake-build: ## Build all services via docker-bake.hcl (cache-efficient)
+	@echo "🔨 Building CTT services with docker-bake.hcl..."
+	@echo "   Tag: $(CTT_IMAGE_TAG)"
+	@echo "   Cache: $(CACHE_DIR)"
+	@docker buildx bake -f $(BAKE_FILE) --load 		--set *.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) 		--set *.cache-from=type=local,src=$(CACHE_DIR)/engine 		--set *.cache-to=type=local,dest=$(CACHE_DIR)/engine,mode=max
+	@echo "✅ Bake build complete (tag: $(CTT_IMAGE_TAG))"
+
+bake-build-%: ## Build specific service via bake (e.g., make bake-build-engine)
+	@echo "🔨 Building service: $* (tag: $(CTT_IMAGE_TAG))"
+	@docker buildx bake -f $(BAKE_FILE) --load $* 		--set $*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)
+	@echo "✅ $* built (tag: $(CTT_IMAGE_TAG))"
+
+bake-prune: ## Prune Docker builder cache (frees disk without destroying images)
+	@echo "🧹 Pruning Docker builder cache..."
+	@docker builder prune -f --filter unused-for=24h
+	@echo "✅ Builder cache pruned"
+
+# =============================================================================
+# Phase 11: Docker Compose with Bake Integration
+# =============================================================================
+
+COMPOSE_FILE := deploy/docker-compose.yml
+
+compose-up-bake: bake-build ## Build via bake, then launch full stack
+	@echo "🚀 Starting CTT stack with pre-built images (tag: $(CTT_IMAGE_TAG))..."
+	@CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) docker-compose -f $(COMPOSE_FILE) up -d
+	@echo "✅ Stack started. Dashboard: http://localhost:5001"
+
+compose-up-kg: bake-build ## Build via bake (including L7-KG), then launch
+	@echo "🚀 Starting CTT stack + L7 Knowledge Graph (tag: $(CTT_IMAGE_TAG))..."
+	@docker buildx bake -f $(BAKE_FILE) --load kg-service 		--set kg-service.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)
+	@CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) docker-compose -f $(COMPOSE_FILE) up -d
+	@echo "✅ Stack + KG started. Dashboard: http://localhost:5001"
+
+compose-build: ## Build all services via docker-compose (fallback, no bake)
+	@echo "🔨 Building CTT stack via docker-compose..."
+	@CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) docker-compose -f $(COMPOSE_FILE) build
+
+compose-up: ## Start CTT stack in detached mode (uses compose build)
+	@echo "🚀 Starting CTT stack..."
+	@CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) docker-compose -f $(COMPOSE_FILE) up -d
+
+compose-down: ## Stop and remove CTT stack
+	@echo "🛑 Stopping CTT stack..."
+	@docker-compose -f $(COMPOSE_FILE) down
+
+compose-logs: ## Tail fusion logs
+	@docker-compose -f $(COMPOSE_FILE) logs -f fusion
+
+compose-ps: ## Show running services
+	@docker-compose -f $(COMPOSE_FILE) ps
+
+# ---------------------------------------------------------------------------
+# Phase 11: Multi-Domain E2E Test with Smart Builds
+# ---------------------------------------------------------------------------
+
+test-multi-domain: ## Run multi-domain E2E with cache-efficient builds
+	@echo "🧪 Running multi-domain E2E (Phase 11 smart builds)..."
+	@cd scripts && PYTHONPATH="../services/config" python test_multi_domain.py 		--domain-a domain-dft --domain-b domain-dhl 		--tag $(CTT_IMAGE_TAG)
+
+# ---------------------------------------------------------------------------
+# Docker Compose — Redpanda variant (disk rescue)
+# ---------------------------------------------------------------------------
+COMPOSE_REDPANDA := deploy/docker-compose-redpanda.yml
+
+compose-up-redpanda: ## Start CTT stack with Redpanda instead of Kafka+Zookeeper
+	@echo "🚀 Starting CTT stack (Redpanda variant)..."
+	@docker-compose -f $(COMPOSE_REDPANDA) up --build -d
+
+compose-down-redpanda: ## Stop Redpanda variant stack
+	@echo "🛑 Stopping CTT stack (Redpanda variant)..."
+	@docker-compose -f $(COMPOSE_REDPANDA) down
+
+compose-logs-redpanda: ## Tail Redpanda variant logs
+	@docker-compose -f $(COMPOSE_REDPANDA) logs -f
 
 # =============================================================================
 # L1 Engine — C++ Flecs Core
@@ -127,26 +216,10 @@ configure-engine: check-deps ## Configure CMake for L1 Engine (clean configure)
 	@echo "⚙️  Configuring L1 Engine..."
 	@echo "   L1_DIR     = '$(L1_DIR)'"
 	@echo "   BUILD_DIR  = '$(BUILD_DIR)'"
-	@if [ -z "$(BUILD_DIR)" ]; then \
-		echo "❌ BUILD_DIR is empty. Aborting."; \
-		exit 1; \
-	fi
-	@if [ "$(BUILD_DIR)" = "$(L1_DIR)" ]; then \
-		echo "❌ BUILD_DIR equals L1_DIR. Refusing to delete source tree."; \
-		exit 1; \
-	fi
-	@if [ -L "$(BUILD_DIR)" ]; then \
-		echo "⚠️  $(BUILD_DIR) is a symlink. Removing symlink only."; \
-		rm -f "$(BUILD_DIR)"; \
-	elif [ -e "$(BUILD_DIR)" ]; then \
-		echo "   Removing existing build directory..."; \
-		rm -rf "$(BUILD_DIR)"; \
-	fi
-	@cmake -B "$(BUILD_DIR)" -S "$(L1_DIR)" -G Ninja \
-		-DCMAKE_BUILD_TYPE=Release \
-		$(CMAKE_PLATFORM_ARGS) \
-		$(CMAKE_EXTRA) \
-		-DCMAKE_POLICY_VERSION_MINIMUM=3.5
+	@if [ -z "$(BUILD_DIR)" ]; then 		echo "❌ BUILD_DIR is empty. Aborting."; 		exit 1; 	fi
+	@if [ "$(BUILD_DIR)" = "$(L1_DIR)" ]; then 		echo "❌ BUILD_DIR equals L1_DIR. Refusing to delete source tree."; 		exit 1; 	fi
+	@if [ -L "$(BUILD_DIR)" ]; then 		echo "⚠️  $(BUILD_DIR) is a symlink. Removing symlink only."; 		rm -f "$(BUILD_DIR)"; 	elif [ -e "$(BUILD_DIR)" ]; then 		echo "   Removing existing build directory..."; 		rm -rf "$(BUILD_DIR)"; 	fi
+	@cmake -B "$(BUILD_DIR)" -S "$(L1_DIR)" -G Ninja 		-DCMAKE_BUILD_TYPE=Release 		$(CMAKE_PLATFORM_ARGS) 		$(CMAKE_EXTRA) 		-DCMAKE_POLICY_VERSION_MINIMUM=3.5
 	@echo "✅ Configure complete"
 
 build-engine: configure-engine ## Build the C++ L1 Engine with all cores
@@ -172,10 +245,7 @@ run-engine-bg: build-engine ## Run L1 Engine in background (logs to /tmp)
 	@$(call wait-for-port,5555,engine)
 
 run-engine-fast: ## Run L1 Engine WITHOUT rebuilding (blocks terminal)
-	@if [ ! -f $(BUILD_DIR)/CTT_Engine ]; then \
-		echo "❌ Engine not built. Run 'make build-engine' first."; \
-		exit 1; \
-	fi
+	@if [ ! -f $(BUILD_DIR)/CTT_Engine ]; then 		echo "❌ Engine not built. Run 'make build-engine' first."; 		exit 1; 	fi
 	@echo "🚀 Starting CTT L1 Engine (fast mode, no rebuild)..."
 	@./$(BUILD_DIR)/CTT_Engine
 
@@ -183,47 +253,18 @@ clean-engine: ## Remove L1 Engine build artifacts (defensive)
 	@echo "🧹 Cleaning L1 Engine build..."
 	@echo "   BUILD_DIR = '$(BUILD_DIR)'"
 	@echo "   L1_DIR    = '$(L1_DIR)'"
-	@if [ -z "$(BUILD_DIR)" ]; then \
-		echo "❌ BUILD_DIR is empty. Aborting."; \
-		exit 1; \
-	fi
-	@if [ "$(BUILD_DIR)" = "$(L1_DIR)" ]; then \
-		echo "❌ BUILD_DIR equals L1_DIR. Refusing to delete source tree."; \
-		exit 1; \
-	fi
-	@if [ -L "$(BUILD_DIR)" ]; then \
-		echo "⚠️  $(BUILD_DIR) is a symlink. Removing symlink only."; \
-		rm -f "$(BUILD_DIR)"; \
-	elif [ -e "$(BUILD_DIR)" ]; then \
-		rm -rf "$(BUILD_DIR)"; \
-	else \
-		echo "   Build directory does not exist — nothing to clean."; \
-	fi
+	@if [ -z "$(BUILD_DIR)" ]; then 		echo "❌ BUILD_DIR is empty. Aborting."; 		exit 1; 	fi
+	@if [ "$(BUILD_DIR)" = "$(L1_DIR)" ]; then 		echo "❌ BUILD_DIR equals L1_DIR. Refusing to delete source tree."; 		exit 1; 	fi
+	@if [ -L "$(BUILD_DIR)" ]; then 		echo "⚠️  $(BUILD_DIR) is a symlink. Removing symlink only."; 		rm -f "$(BUILD_DIR)"; 	elif [ -e "$(BUILD_DIR)" ]; then 		rm -rf "$(BUILD_DIR)"; 	else 		echo "   Build directory does not exist — nothing to clean."; 	fi
 	@echo "✅ Clean complete"
 
-docker-engine: ## Build L1 Engine Docker image
-	@which docker >/dev/null 2>&1 || { \
-		echo "❌ Docker binary not found in PATH."; \
-		echo "   macOS:  brew install docker colima"; \
-		echo "   Linux:  https://docs.docker.com/get-docker/"; \
-		echo "   Or build natively: make build-engine"; \
-		exit 1; \
-	}
-	@docker info >/dev/null 2>&1 || { \
-		echo "❌ Docker daemon is not running."; \
-		echo ""; \
-		echo "   If you use Colima:"; \
-		echo "      colima start --cpu 4 --memory 8"; \
-		echo ""; \
-		echo "   If you use Docker Desktop:"; \
-		echo "      Open Docker Desktop from Applications and wait for the whale icon."; \
-		echo ""; \
-		echo "   Or build natively: make build-engine"; \
-		exit 1; \
-	}
+docker-engine: ## Build L1 Engine Docker image (legacy, use bake-build instead)
+	@echo "⚠️  Consider using 'make bake-build-engine' for cache efficiency"
+	@which docker >/dev/null 2>&1 || { 		echo "❌ Docker binary not found in PATH."; 		echo "   macOS:  brew install docker colima"; 		echo "   Linux:  https://docs.docker.com/get-docker/"; 		echo "   Or build natively: make build-engine"; 		exit 1; 	}
+	@docker info >/dev/null 2>&1 || { 		echo "❌ Docker daemon is not running."; 		echo ""; 		echo "   If you use Colima:"; 		echo "      colima start --cpu 4 --memory 8"; 		echo ""; 		echo "   If you use Docker Desktop:"; 		echo "      Open Docker Desktop from Applications and wait for the whale icon."; 		echo ""; 		echo "   Or build natively: make build-engine"; 		exit 1; 	}
 	@echo "🐳 Building L1 Engine Docker image..."
-	@docker build -f $(L1_DIR)/Dockerfile -t ctt-engine:latest .
-	@echo "✅ Docker image ctt-engine:latest built"
+	@docker build -f $(L1_DIR)/Dockerfile -t ctt-engine:$(CTT_IMAGE_TAG) .
+	@echo "✅ Docker image ctt-engine:$(CTT_IMAGE_TAG) built"
 
 # =============================================================================
 # L2 Bridge — Python Telemetry & Dashboard
@@ -252,16 +293,6 @@ run-orchestrator-bg: ## Run L2 Orchestrator in background (native)
 	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR)" nohup python orchestrator.py > /tmp/ctt_orchestrator.log 2>&1 &
 	@echo "🧠 Orchestrator backgrounded (log: /tmp/ctt_orchestrator.log)"
 
-# ---------------------------------------------------------------------------
-# Full Docker Compose — Orchestrator variant
-# ---------------------------------------------------------------------------
-compose-up-orchestrator: ## Start CTT stack with separate orchestrator container
-	@echo "🚀 Starting CTT stack (orchestrator variant)..."
-	@docker-compose -f deploy/docker-compose.yml up --build -d
-
-compose-ps-orchestrator: ## Show running services including orchestrator
-	@docker-compose -f deploy/docker-compose.yml ps
-
 # =============================================================================
 # L3 Analytics — Python Data Science & ML
 # =============================================================================
@@ -286,6 +317,24 @@ run-audit-logger: ## Run audit logger natively (requires Kafka/Redpanda running)
 run-federation-bridge: ## Run federation bridge natively
 	@echo "🏛️ Starting Federation Bridge..."
 	@cd services/l5-macro && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR):." python federation_bridge.py
+
+# =============================================================================
+# L7 Knowledge Graph — Setup & Run
+# =============================================================================
+
+setup-l7: ## Setup L7 Knowledge Graph Python environment
+	@echo "🧠 Setting up L7 Knowledge Graph..."
+	@cd $(L7_DIR) && $(PYTHON_VENV_CMD)
+	@cd $(L7_DIR) && $(PYTHON_PIP_CMD) -r requirements.txt
+	@echo "✅ L7 environment ready"
+
+run-kg-bridge: ## Run L7 KG bridge natively (requires engine running)
+	@echo "🌉 Starting L7 KG Bridge..."
+	@cd $(L7_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR):." python kg_bridge.py
+
+run-learn-mod: ## Run L7 Emergent Learning Module
+	@echo "📊 Starting L7 Learning Module..."
+	@cd $(L7_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR):." python learn_mod.py
 
 # =============================================================================
 # Data Pipeline — Inbound Refinery
@@ -322,37 +371,6 @@ run-fusion-bg: ## Run fusion in background
 	@echo "⚡ Fusion backgrounded (log: /tmp/ctt_fusion.log)"
 	@$(call wait-for-port,5556,fusion)
 
-
-colima-status: ## Check Colima VM status and resource usage
-	@echo "🖥️  Colima Status"
-	@colima status 2>/dev/null || echo "❌ Colima not running. Start with: make colima-reset"
-	@echo ""
-	@echo "💾 Lima disk usage:"
-	@du -sh ~/.colima/_lima/_disks 2>/dev/null || echo "   (Lima disks not found)"
-	@echo ""
-	@make docker-df
-
-# =============================================================================
-# Colima reset
-# =============================================================================
-colima-reset: ## Reset Colima VM to reclaim disk space (destructive)
-	@echo "🛑 Stopping and deleting Colima VM..."
-	@colima stop 2>/dev/null || true
-	@colima delete 2>/dev/null || true
-	@echo "🚀 Starting fresh Colima VM (15 GB disk)..."
-	@colima start --cpu 4 --memory 8 --disk 15
-	@echo "✅ Colima reset complete. Rebuild with: docker-compose up --build -d"
-
-colima-nuke: ## Full Lima store reset (fixes _disks bloat)
-	@echo "🛑 Stopping Colima..."
-	@colima stop 2>/dev/null || true
-	@echo "💥 Deleting Lima disks + instances..."
-	@rm -rf ~/.colima/_lima/_disks
-	@rm -rf ~/.colima/_lima/colima
-	@echo "🚀 Starting fresh Colima..."
-	@colima start --cpu 4 --memory 8 --disk 30
-	@echo "✅ Nuclear reset complete. Rebuild with: docker-compose up --build -d"
-
 # =============================================================================
 # Testing & Verification
 # =============================================================================
@@ -366,20 +384,7 @@ healthcheck: ## Quick check: are all expected ports listening?
 	@echo "────────────────────────────────────────"
 	@echo "Component          | Port | Status"
 	@echo "────────────────────────────────────────"
-	@for port in 5555 5556 5560 5561 5001; do \
-		if nc -z localhost $$port 2>/dev/null; then \
-			status="✅ UP"; \
-		else \
-			status="⬜ DOWN"; \
-		fi; \
-		case $$port in \
-			5555) echo "L1 Engine (telemetry) | 5555 | $$status" ;; \
-			5556) echo "Fusion (perturbations)| 5556 | $$status" ;; \
-			5560) echo "Harvester (raw data)  | 5560 | $$status" ;; \
-			5561) echo "Interpreter (mapped)  | 5561 | $$status" ;; \
-			5001) echo "Dashboard (REST API)  | 5001 | $$status" ;; \
-		esac; \
-	done
+	@for port in 5555 5556 5560 5561 5001; do 		if nc -z localhost $$port 2>/dev/null; then 			status="✅ UP"; 		else 			status="⬜ DOWN"; 		fi; 		case $$port in 			5555) echo "L1 Engine (telemetry) | 5555 | $$status" ;; 			5556) echo "Fusion (perturbations)| 5556 | $$status" ;; 			5560) echo "Harvester (raw data)  | 5560 | $$status" ;; 			5561) echo "Interpreter (mapped)  | 5561 | $$status" ;; 			5001) echo "Dashboard (REST API)  | 5001 | $$status" ;; 		esac; 	done
 	@echo "────────────────────────────────────────"
 
 test-e2e: ## Run end-to-end pipeline test (requires engine running)
@@ -416,6 +421,7 @@ stop-native: stop-pipeline ## Kill ALL native background processes (engine + das
 	@echo "🛑 Stopping native engine & dashboard..."
 	@pkill -f "CTT_Engine" 2>/dev/null || true
 	@pkill -f "dashboard.py" 2>/dev/null || true
+	@pkill -f "orchestrator.py" 2>/dev/null || true
 	@sleep 0.5
 	@echo "✅ Native stack stopped"
 	@make healthcheck
@@ -427,17 +433,12 @@ stop-native: stop-pipeline ## Kill ALL native background processes (engine + das
 EXPLORER_DIR := $(HOME)/explorer
 
 run-explorer: ## Host Flecs Explorer on http://localhost:8000
-	@if [ ! -d $(EXPLORER_DIR)/etc ]; then \
-		echo "🌐 Flecs Explorer not found. Cloning to $(EXPLORER_DIR)..."; \
-		git clone --depth 1 https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); \
-	fi
+	@if [ ! -d $(EXPLORER_DIR)/etc ]; then 		echo "🌐 Flecs Explorer not found. Cloning to $(EXPLORER_DIR)..."; 		git clone --depth 1 https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); 	fi
 	@echo "🌐 Starting Flecs Explorer at http://localhost:8000"
 	@cd $(EXPLORER_DIR)/etc && python3 -m http.server 8000
 
 run-explorer-bg: ## Start Flecs Explorer in background
-	@if [ ! -d $(EXPLORER_DIR)/etc ]; then \
-		git clone --depth 1 https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); \
-	fi
+	@if [ ! -d $(EXPLORER_DIR)/etc ]; then 		git clone --depth 1 https://github.com/flecs-hub/explorer.git $(EXPLORER_DIR); 	fi
 	@cd $(EXPLORER_DIR)/etc && nohup python3 -m http.server 8000 > /tmp/ctt_explorer.log 2>&1 &
 	@echo "🌐 Explorer backgrounded (log: /tmp/ctt_explorer.log)"
 
@@ -450,10 +451,7 @@ PROTO_OUT  := services/data-pipeline/fusion
 
 proto: ## Generate Python protobuf module
 	@echo "🧬 Generating Protobuf bindings..."
-	@$(PYTHON_BIN) -m grpc_tools.protoc \
-		--python_out=$(PROTO_OUT) \
-		-Iapi/proto \
-		$(PROTO_FILE)
+	@$(PYTHON_BIN) -m grpc_tools.protoc 		--python_out=$(PROTO_OUT) 		-Iapi/proto 		$(PROTO_FILE)
 	@echo "✅ Generated: $(PROTO_OUT)/ctt_messages_pb2.py"
 
 proto-clean: ## Remove generated protobuf files
@@ -461,48 +459,7 @@ proto-clean: ## Remove generated protobuf files
 	@echo "🧹 Protobuf bindings cleaned"
 
 # =============================================================================
-# Docker Compose Targets
-# =============================================================================
-
-COMPOSE_FILE := deploy/docker-compose.yml
-
-compose-build: ## Build all services via docker-compose
-	@echo "🔨 Building CTT stack..."
-	@docker-compose -f $(COMPOSE_FILE) build
-
-compose-up: ## Start CTT stack in detached mode
-	@echo "🚀 Starting CTT stack..."
-	@docker-compose -f $(COMPOSE_FILE) up -d
-
-compose-down: ## Stop and remove CTT stack
-	@echo "🛑 Stopping CTT stack..."
-	@docker-compose -f $(COMPOSE_FILE) down
-
-compose-logs: ## Tail fusion logs
-	@docker-compose -f $(COMPOSE_FILE) logs -f fusion
-
-compose-ps: ## Show running services
-	@docker-compose -f $(COMPOSE_FILE) ps
-
-# ---------------------------------------------------------------------------
-# Docker Compose — Redpanda variant (disk rescue)
-# ---------------------------------------------------------------------------
-COMPOSE_REDPANDA := deploy/docker-compose-redpanda.yml
-
-compose-up-redpanda: ## Start CTT stack with Redpanda instead of Kafka+Zookeeper
-	@echo "🚀 Starting CTT stack (Redpanda variant)..."
-	@docker-compose -f $(COMPOSE_REDPANDA) up --build -d
-
-compose-down-redpanda: ## Stop Redpanda variant stack
-	@echo "🛑 Stopping CTT stack (Redpanda variant)..."
-	@docker-compose -f $(COMPOSE_REDPANDA) down
-
-compose-logs-redpanda: ## Tail Redpanda variant logs
-	@docker-compose -f $(COMPOSE_REDPANDA) logs -f
-
-
-# =============================================================================
-# Docker Diagnostics
+# Phase 11: Docker Diagnostics & Disk Management
 # =============================================================================
 
 docker-df: ## Show Docker disk usage (images, containers, volumes, build cache)
@@ -522,19 +479,71 @@ docker-prune: ## Aggressive cleanup: remove dangling images, stopped containers,
 	@echo "✅ Prune complete"
 	@make docker-df
 
+docker-prune-soft: ## Soft prune: only dangling images and unused build cache
+	@echo "🧹 Soft pruning Docker (safe)..."
+	@docker image prune -f
+	@docker builder prune -f --filter unused-for=24h
+	@echo "✅ Soft prune complete"
+	@make docker-df
+
+# =============================================================================
+# Phase 11: Colima Disk Compaction (Non-Destructive)
+# =============================================================================
+
+docker-compact: ## Compact Colima VM disk (non-destructive, requires qemu-img)
+	@echo "💾 Attempting Colima VM disk compaction..."
+	@echo "   This requires qemu-img (install: brew install qemu)"
+	@which qemu-img >/dev/null 2>&1 || { 		echo "❌ qemu-img not found. Install with: brew install qemu"; 		exit 1; 	}
+	@echo "🛑 Stopping Colima..."
+	@colima stop 2>/dev/null || true
+	@echo "💾 Compacting disk image..."
+	@qemu-img convert -O qcow2 		~/.colima/_lima/_disks/default 		~/.colima/_lima/_disks/default.compact 2>/dev/null && 		mv ~/.colima/_lima/_disks/default.compact ~/.colima/_lima/_disks/default && 		echo "✅ Disk compacted successfully" || 		echo "⚠️  Compaction failed (disk may already be optimal or path differs)"
+	@echo "🚀 Restarting Colima..."
+	@colima start
+	@echo "✅ Colima restarted"
+
+colima-status: ## Check Colima VM status and resource usage
+	@echo "🖥️  Colima Status"
+	@colima status 2>/dev/null || echo "❌ Colima not running. Start with: make colima-reset"
+	@echo ""
+	@echo "💾 Lima disk usage:"
+	@du -sh ~/.colima/_lima/_disks 2>/dev/null || echo "   (Lima disks not found)"
+	@echo ""
+	@make docker-df
+
+colima-reset: ## Reset Colima VM to reclaim disk space (destructive)
+	@echo "🛑 Stopping and deleting Colima VM..."
+	@colima stop 2>/dev/null || true
+	@colima delete 2>/dev/null || true
+	@echo "🚀 Starting fresh Colima VM (15 GB disk)..."
+	@colima start --cpu 4 --memory 8 --disk 15
+	@echo "✅ Colima reset complete. Rebuild with: docker-compose up --build -d"
+
+colima-nuke: ## Full Lima store reset (fixes _disks bloat)
+	@echo "🛑 Stopping Colima..."
+	@colima stop 2>/dev/null || true
+	@echo "💥 Deleting Lima disks + instances..."
+	@rm -rf ~/.colima/_lima/_disks
+	@rm -rf ~/.colima/_lima/colima
+	@echo "🚀 Starting fresh Colima..."
+	@colima start --cpu 4 --memory 8 --disk 30
+	@echo "✅ Nuclear reset complete. Rebuild with: docker-compose up --build -d"
+
 # =============================================================================
 # Global Utilities
 # =============================================================================
 
 fmt-engine: ## Format C++ source files (requires clang-format)
 	@echo "🎨 Formatting C++ sources..."
-	@find $(L1_DIR)/src $(L1_DIR)/include -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) | \
-		xargs clang-format -i -style=file 2>/dev/null || \
-		echo "⚠️  clang-format not installed."
+	@find $(L1_DIR)/src $(L1_DIR)/include -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) | 		xargs clang-format -i -style=file 2>/dev/null || 		echo "⚠️  clang-format not installed."
 
-clean-all: clean-engine ## Clean everything (builds + Python envs)
+clean-all: clean-engine ## Clean everything (builds + Python envs + Docker cache)
 	@echo "🧹 Cleaning Python environments..."
-	@rm -rf $(L2_DIR)/.venv $(L3_DIR)/.venv 2>/dev/null || true
+	@rm -rf $(L2_DIR)/.venv $(L3_DIR)/.venv services/l5-macro/.venv $(L7_DIR)/.venv 2>/dev/null || true
+	@echo "🧹 Cleaning Docker build cache..."
+	@docker builder prune -f 2>/dev/null || true
+	@echo "🧹 Cleaning source hash tracking..."
+	@rm -f .ctt_source_hashes.json
 	@echo "✅ All artifacts cleaned"
 
 all: build-engine setup-python ## Build engine + setup Python (full onboarding)

@@ -1,6 +1,6 @@
 # CTT Project Structure
 
-**Generated:** Mon Jun  1 22:56:50 BST 2026
+**Generated:** Tue Jun 16 08:25:57 BST 2026
 
 ```
 └── CTT
@@ -92,13 +92,22 @@
         │   ├── audit_logger.py
         │   ├── federation_bridge.py
         │   └── requirements.txt
-        └── l6-gaiax
-            ├── Dockerfile
+        ├── l6-gaiax
+        │   ├── Dockerfile
+        │   ├── README.md
+        │   ├── edc-deployment.yaml
+        │   ├── edc_gateway.py
+        │   ├── policy_enforcer.py
+        │   ├── requirements.txt
+        │   ├── self-descriptions
+        │   │   └── gaiax_self_description_dhl_express.json
+        │   └── self_description.json
+        └── l7-kg
             ├── README.md
-            ├── edc_gateway.py
-            ├── policy_enforcer.py
+            ├── include
+            │   └── ssn_experience_component.h
+            ├── kg_bridge.py
+            ├── learn_mod.py
             ├── requirements.txt
-            ├── self-descriptions
-            │   └── gaiax_self_description_dhl_express.json
-            └── self_description.json
+            └── sig_compressor.py
 ```

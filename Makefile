@@ -124,12 +124,20 @@ bake-build: ## Build all services via docker-bake.hcl (cache-efficient)
 	@echo "🔨 Building CTT services with docker-bake.hcl..."
 	@echo "   Tag: $(CTT_IMAGE_TAG)"
 	@echo "   Cache: $(CACHE_DIR)"
-	@docker buildx bake -f $(BAKE_FILE) --load 		--set *.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) 		--set *.cache-from=type=local,src=$(CACHE_DIR)/engine 		--set *.cache-to=type=local,dest=$(CACHE_DIR)/engine,mode=max
+	@echo "   Tip: If headers changed but build is cached, run: make bake-build-force"
+	@mkdir -p $(CACHE_DIR)/engine $(CACHE_DIR)/harvester $(CACHE_DIR)/interpreter 		$(CACHE_DIR)/fusion $(CACHE_DIR)/dashboard $(CACHE_DIR)/orchestrator 		$(CACHE_DIR)/audit-logger $(CACHE_DIR)/federation-bridge $(CACHE_DIR)/kg
+	@docker buildx bake -f $(BAKE_FILE) --load 		--allow=fs=/private/tmp 		--set *.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) 		--set *.cache-from=type=local,src=$(CACHE_DIR)/engine 		--set *.cache-to=type=local,dest=$(CACHE_DIR)/engine,mode=max
 	@echo "✅ Bake build complete (tag: $(CTT_IMAGE_TAG))"
+
+bake-build-force: ## Force rebuild all services (no cache — use after header changes)
+	@echo "🔨 Force-building CTT services (no cache)..."
+	@docker buildx bake -f $(BAKE_FILE) --load --no-cache 		--allow=fs=/private/tmp 		--set *.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)
+	@echo "✅ Force build complete (tag: $(CTT_IMAGE_TAG))"
 
 bake-build-%: ## Build specific service via bake (e.g., make bake-build-engine)
 	@echo "🔨 Building service: $* (tag: $(CTT_IMAGE_TAG))"
-	@docker buildx bake -f $(BAKE_FILE) --load $* 		--set $*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)
+	@mkdir -p $(CACHE_DIR)/$*
+	@docker buildx bake -f $(BAKE_FILE) --load $* 		--allow=fs=/private/tmp 		--set $*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)
 	@echo "✅ $* built (tag: $(CTT_IMAGE_TAG))"
 
 bake-prune: ## Prune Docker builder cache (frees disk without destroying images)
@@ -490,17 +498,19 @@ docker-prune-soft: ## Soft prune: only dangling images and unused build cache
 # Phase 11: Colima Disk Compaction (Non-Destructive)
 # =============================================================================
 
-docker-compact: ## Compact Colima VM disk (non-destructive, requires qemu-img)
-	@echo "💾 Attempting Colima VM disk compaction..."
-	@echo "   This requires qemu-img (install: brew install qemu)"
-	@which qemu-img >/dev/null 2>&1 || { 		echo "❌ qemu-img not found. Install with: brew install qemu"; 		exit 1; 	}
-	@echo "🛑 Stopping Colima..."
-	@colima stop 2>/dev/null || true
-	@echo "💾 Compacting disk image..."
-	@qemu-img convert -O qcow2 		~/.colima/_lima/_disks/default 		~/.colima/_lima/_disks/default.compact 2>/dev/null && 		mv ~/.colima/_lima/_disks/default.compact ~/.colima/_lima/_disks/default && 		echo "✅ Disk compacted successfully" || 		echo "⚠️  Compaction failed (disk may already be optimal or path differs)"
-	@echo "🚀 Restarting Colima..."
-	@colima start
-	@echo "✅ Colima restarted"
+docker-compact: ## ⚠️ Compact Colima VM disk (known to INCREASE size — use colima-nuke)
+	@echo "💾 Colima VM disk compaction"
+	@echo ""
+	@echo "   ⚠️  KNOWN ISSUE: Previous runs showed disk INCREASE (16.74GB → 19.75GB)."
+	@echo "   qemu-img convert created a non-sparse copy alongside the original."
+	@echo ""
+	@echo "   RECOMMENDED: Use 'make colima-nuke' for guaranteed cleanup."
+	@echo "   Current disk state:"
+	@du -sh ~/.colima/_lima/_disks/ 2>/dev/null || echo "   (Lima disks not found)"
+	@echo ""
+	@echo "   To nuke and start fresh (DESTRUCTIVE but reliable):"
+	@echo "      make colima-nuke"
+	@false
 
 colima-status: ## Check Colima VM status and resource usage
 	@echo "🖥️  Colima Status"

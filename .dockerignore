@@ -108,4 +108,7 @@ node_modules/
 # =============================================================================
 # Keep: source code, configs, proto definitions, Makefiles, requirements
 # =============================================================================
+# Keep L7-KG headers (needed by C++ engine)
+!services/l7-kg/include/
+!services/l7-kg/include/
 # (Everything NOT excluded above is kept)

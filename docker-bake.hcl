@@ -1,6 +1,6 @@
 // =============================================================================
 // CTT Project — Docker Bake Configuration
-// Phase 11: Cache-efficient multi-service builds with local cache persistence
+// Phase 12: Cache-efficient multi-service builds with local cache persistence
 //
 // Usage:
 //   CTT_IMAGE_TAG=abc123 docker buildx bake        # Build all services
@@ -96,28 +96,18 @@ target "orchestrator" {
   cache-to   = ["type=local,dest=${CACHE_DIR}/orchestrator,mode=max"]
 }
 
-target "audit-logger" {
+// Phase 12: L5 services share one Dockerfile (single-stage, differentiated by command)
+target "l5-macro" {
   inherits = ["_common"]
   context = "."
   dockerfile = "services/l5-macro/Dockerfile"
-  target = "audit-logger"
-  tags = ["ctt-audit-logger:${CTT_IMAGE_TAG}"]
-  cache-from = ["type=local,src=${CACHE_DIR}/audit-logger"]
-  cache-to   = ["type=local,dest=${CACHE_DIR}/audit-logger,mode=max"]
-}
-
-target "federation-bridge" {
-  inherits = ["_common"]
-  context = "."
-  dockerfile = "services/l5-macro/Dockerfile"
-  target = "federation-bridge"
-  tags = ["ctt-federation-bridge:${CTT_IMAGE_TAG}"]
-  cache-from = ["type=local,src=${CACHE_DIR}/federation-bridge"]
-  cache-to   = ["type=local,dest=${CACHE_DIR}/federation-bridge,mode=max"]
+  tags = ["ctt-l5-macro:${CTT_IMAGE_TAG}", "ctt-audit-logger:${CTT_IMAGE_TAG}", "ctt-federation-bridge:${CTT_IMAGE_TAG}"]
+  cache-from = ["type=local,src=${CACHE_DIR}/l5-macro"]
+  cache-to   = ["type=local,dest=${CACHE_DIR}/l5-macro,mode=max"]
 }
 
 // =============================================================================
-// L7 Knowledge Graph (Phase 11)
+// L7 Knowledge Graph (Phase 12)
 // =============================================================================
 
 target "kg-service" {
@@ -137,7 +127,7 @@ group "default" {
   targets = [
     "engine", "harvester", "interpreter", "fusion",
     "dashboard", "orchestrator",
-    "audit-logger", "federation-bridge"
+    "l5-macro"
   ]
 }
 
@@ -150,14 +140,19 @@ group "l2" {
 }
 
 group "l5" {
-  targets = ["audit-logger", "federation-bridge"]
+  targets = ["l5-macro"]
 }
 
 group "all-with-kg" {
   targets = [
     "engine", "harvester", "interpreter", "fusion",
     "dashboard", "orchestrator",
-    "audit-logger", "federation-bridge",
+    "l5-macro",
     "kg-service"
   ]
+}
+
+// Phase 12: Minimal test group (engine + kg only)
+group "phase12-test" {
+  targets = ["engine", "kg-service"]
 }

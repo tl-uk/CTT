@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdlib>
 #include "SimulationEngine.h"
+#include "AgentComponents.h"
 #include "ssn_experience_component.h"
 #include "DataBridge.h"
 

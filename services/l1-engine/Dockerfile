@@ -45,6 +45,11 @@ WORKDIR /app
 COPY --from=builder /build/services/l1-engine/build/CTT_Engine /app/CTT_Engine
 COPY --from=builder /build/services/l1-engine/build/_deps/flecs-src/include/ /app/include/
 
+# Phase 12 FIX: Copy the Flecs shared library into the runtime image
+# The binary links against libflecs.so but the runtime stage was missing it
+COPY --from=builder /build/services/l1-engine/build/_deps/flecs-build/libflecs.so /usr/lib/
+RUN ldconfig
+
 USER ctt_user
 
 EXPOSE 5555 27750

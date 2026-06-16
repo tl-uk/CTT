@@ -39,6 +39,8 @@ BASE_PORTS = {
     "interpreter_pub": 5561,    # Host: 5561+offset, Container: 5561 (internal only)
     "policy_pub": 5563,         # Host: 5563+offset, Container: 5563
     "tactical_pub": 5564,       # Host: 5564+offset, Container: 5564
+    "kg_pub": 5565,             # Host: 5565+offset, Container: 5565
+    "kg_sub": 5566,             # Host: 5566+offset, Container: 5566
     "kafka_broker": 9092,       # Host: 9092+offset, Container: 9092
     "dashboard_rest": 5001,     # Host: 5001+offset, Container: 5001
     "grafana": 3000,            # Host: 3000+offset, Container: 3000
@@ -417,6 +419,31 @@ services:
       resources:
         limits:
           memory: 128M
+
+
+  l7-kg-{domain_id}:
+    build:
+      context: ..
+      dockerfile: services/l7-kg/Dockerfile
+    container_name: ctt-l7-kg-{domain_id}
+    ports:
+      - "{host_ports['kg_pub']}:{container_ports['kg_pub']}"
+      - "{host_ports['kg_sub']}:{container_ports['kg_sub']}"
+    environment:
+      - CTT_KG_PUB=tcp://*:{container_ports['kg_pub']}
+      - CTT_KG_SUB=tcp://localhost:{container_ports['kg_sub']}
+      - CTT_L1_ENGINE_HOST=engine-{domain_id}
+      - PYTHONPATH=/app/services/config:/app/services/l7-kg
+    networks:
+      - {network}
+    depends_on:
+      engine-{domain_id}:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
 networks:
   {network}:

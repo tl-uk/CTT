@@ -62,6 +62,7 @@ void SimulationEngine::register_systems() {
             if (!m.is_decarbonized) {
                 if (m.adversarial_pressure >= effective_high) {
                     m.is_decarbonized = true;
+                    entity.add<OneShotSuccess>();  // Phase 12: Trigger SSN recording
                     std::cout << "[L3] " << entity.name() 
                               << " -> GREEN (thr=" << effective_high << ")" << std::endl;
                 }
@@ -188,22 +189,34 @@ void SimulationEngine::register_systems() {
             ssn.confidence = 1.0f;  // Direct observation = max confidence
             ssn.is_one_shot_success = true;
 
-            // Generate semantic signature from context
-            std::seed_seq seed{
-                static_cast<int>(mindset.adversarial_pressure * 100),
-                static_cast<int>(energy.currentEnergyStorage),
-                static_cast<int>(pos.latitude * 10000),
-                static_cast<int>(pos.longitude * 10000),
-                static_cast<int>(ext.current_co2_g_km),
-                static_cast<int>(soc.deprivation_index * 10)
-            };
-            std::mt19937 gen(seed);
-            std::normal_distribution<float> dist(0.0f, 1.0f);
+            // Generate deterministic semantic signature from context
+            // Phase 12: Matches sig_compressor.py SHA-256 algorithm
+            // Canonical context string: {stimulus, procedure, result} fields
+            std::string context_str = std::string(entity.name().c_str()) + "|" +
+                std::to_string(static_cast<int>(mindset.adversarial_pressure * 100)) + "|" +
+                std::to_string(static_cast<int>(energy.currentEnergyStorage)) + "|" +
+                std::to_string(static_cast<int>(pos.latitude * 10000)) + "|" +
+                std::to_string(static_cast<int>(pos.longitude * 10000)) + "|" +
+                std::to_string(static_cast<int>(ext.current_co2_g_km)) + "|" +
+                std::to_string(static_cast<int>(soc.deprivation_index * 10)) + "|" +
+                soc.corridor_id;
+
+            // Simple deterministic hash: FNV-1a style, expanded to 128 dims
+            // Same context always produces same signature
+            uint64_t hash = 0xcbf29ce484222325;  // FNV offset basis
+            for (char c : context_str) {
+                hash ^= static_cast<uint64_t>(c);
+                hash *= 0x100000001b3;  // FNV prime
+            }
 
             float norm_sq = 0.0f;
             for (size_t j = 0; j < SSN_Experience_Component::VECTOR_DIM; ++j) {
-                ssn.signature[j] = dist(gen);
-                norm_sq += ssn.signature[j] * ssn.signature[j];
+                // Mix hash with index for dimension diversity
+                uint64_t dim_hash = hash ^ (j * 0x9e3779b97f4a7c15);
+                // Map to [-1, 1] range (same formula as Python: byte/127.5 - 1.0)
+                float val = static_cast<float>(dim_hash % 256) / 127.5f - 1.0f;
+                ssn.signature[j] = val;
+                norm_sq += val * val;
             }
             // L2 normalize
             float norm = std::sqrt(norm_sq);

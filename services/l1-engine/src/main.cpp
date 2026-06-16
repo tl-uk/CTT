@@ -9,6 +9,10 @@
 #include "ssn_experience_component.h"
 #include "DataBridge.h"
 
+// Phase 12: Explicit using declarations for lambda type visibility
+using CTT::SSN_Experience_Component;
+using CTT::SocialImpactComponent;
+
 // Global shutdown flag for ZMQ thread
 std::atomic<bool> g_running{true};
 

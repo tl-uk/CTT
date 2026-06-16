@@ -1,0 +1,22 @@
+# CTT .dockerignore
+# Phase 12: Explicitly allow L7-KG headers for C++ build
+
+# Python environments
+**/.venv/
+**/__pycache__/
+**/*.pyc
+
+# Build artifacts
+**/build/
+**/.ctt_source_hashes.json
+
+# IDE
+**/.vscode/
+**/.idea/
+
+# OS
+.DS_Store
+
+# BUT: Keep L7-KG headers (needed by C++ engine)
+!services/l7-kg/include/
+!services/l7-kg/include/**

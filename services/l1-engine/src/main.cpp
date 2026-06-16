@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdlib>
 #include "SimulationEngine.h"
+#include "ssn_experience_component.h"
 #include "DataBridge.h"
 
 // Global shutdown flag for ZMQ thread
@@ -102,12 +103,10 @@ int main() {
         engine.update(delta_time);
 
         // 2b. Phase 12: Broadcast new SSN experiences to L7 Knowledge Graph
-        auto q_ssn = engine.get_world().query<const SSN_Experience_Component, const SocialImpactComponent>();
-        q_ssn.each([&](flecs::entity e, const SSN_Experience_Component& ssn, const SocialImpactComponent& soc) {
+        engine.get_world().each([&](flecs::entity e, SSN_Experience_Component& ssn, const SocialImpactComponent& soc) {
             if (ssn.confidence >= 0.99f) {
                 bridge.broadcast_kg_experience(e.name().c_str(), ssn, soc.corridor_id);
-                auto* mutable_ssn = e.get_mut<SSN_Experience_Component>();
-                if (mutable_ssn) mutable_ssn->confidence = 0.95f;
+                ssn.confidence = 0.95f;  // Mark as sent
             }
         });
 

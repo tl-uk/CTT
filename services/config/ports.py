@@ -36,11 +36,11 @@ ZMQ_PORTS = {
     "INTERPRETER_PUB": "tcp://*:5561",
     "INTERPRETER_SUB": f"tcp://{_INTERPRETER_HOST}:5561",
 
-    # Policy Bridge (structural feedback to L2/L3)
+    # Phase 6 — L5 Policy Bridge (structural feedback to L2/L3)
     "POLICY_PUB": "tcp://*:5563",
     "POLICY_SUB": f"tcp://{_POLICY_HOST}:5563",
 
-    # Orchestrator (tactical policies, separate from structural L5)
+    # Phase 6.5 — L2 Orchestrator (tactical policies, separate from structural L5)
     "TACTICAL_PUB": "tcp://*:5564",
     "TACTICAL_SUB": f"tcp://{_TACTICAL_HOST}:5564",
 

@@ -6,6 +6,7 @@
 #include <zmq.hpp>
 #include "flecs.h"
 #include "AgentComponents.h"
+#include "ssn_experience_component.h"
 
 namespace CTT {
 

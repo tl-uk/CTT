@@ -1,5 +1,6 @@
 // services/l1-engine/src/DataBridge.cpp
 #include "DataBridge.h"
+#include "ctt_messages.pb.h"
 #include "AgentComponents.h"
 #include <nlohmann/json.hpp>
 #include <iostream>
@@ -344,14 +345,12 @@ void DataBridge::apply_kg_matches(flecs::world& world, const std::vector<KGMatch
     for (const auto& match : matches) {
         auto e = world.lookup(match.agent_id.c_str());
         if (e.is_alive()) {
-            auto* mindset = e.get_mut<MindsetComponent>();
-            if (mindset) {
-                float boost = match.confidence * 2.0f;
-                mindset->satisfaction = std::min(10.0, mindset->satisfaction + boost);
+            auto& mindset = e.get_mut<MindsetComponent>();
+            float boost = match.confidence * 2.0f;
+            mindset.satisfaction = std::min(10.0, mindset.satisfaction + boost);
 
-                std::cout << "[L7-KG] 🎯 Applied match to " << match.agent_id 
-                          << " (satisfaction +" << boost << ")" << std::endl;
-            }
+            std::cout << "[L7-KG] 🎯 Applied match to " << match.agent_id 
+                      << " (satisfaction +" << boost << ")" << std::endl;
         } else {
             std::cerr << "[L7-KG] ⚠️  Agent not found: " << match.agent_id << std::endl;
         }

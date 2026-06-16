@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir -r /app/services/l7-kg/requirements.txt
 # Copy source code
 COPY services/l7-kg/*.py /app/services/l7-kg/
 COPY services/config/ports.py /app/services/config/
-COPY services/config/settings.py /app/services/config/ 2>/dev/null || true
+COPY services/config/settings.py /app/services/config/
 
 # Set Python path
 ENV PYTHONPATH=/app/services/config:/app/services/l7-kg

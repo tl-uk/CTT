@@ -35,8 +35,10 @@ RUN touch /build/services/l7-kg/include/ssn_experience_component.h && \
 # =============================================================================
 FROM debian:bookworm-slim
 
+# Phase 12 FIX: Added netcat-openbsd for healthcheck support
+# The docker-compose.yml healthcheck uses: ["CMD", "nc", "-z", "localhost", "5555"]
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libzmq5 libprotobuf32 \
+    libzmq5 libprotobuf32 netcat-openbsd \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /bin/bash ctt_user
 
@@ -46,7 +48,6 @@ COPY --from=builder /build/services/l1-engine/build/CTT_Engine /app/CTT_Engine
 COPY --from=builder /build/services/l1-engine/build/_deps/flecs-src/include/ /app/include/
 
 # Phase 12 FIX: Copy the Flecs shared library into the runtime image
-# The binary links against libflecs.so but the runtime stage was missing it
 COPY --from=builder /build/services/l1-engine/build/_deps/flecs-build/libflecs.so /usr/lib/
 RUN ldconfig
 

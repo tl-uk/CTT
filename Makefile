@@ -1,6 +1,6 @@
 # =============================================================================
 # CTT Project — Cross-Platform Build Orchestration (macOS / Linux / Docker)
-# Phase 11: Docker Bake integration, cache-efficient builds, disk management
+# Phase 12: Docker Bake integration, cache-efficient builds, disk management
 # =============================================================================
 
 .PHONY: help all check-deps configure-engine build-engine run-engine run-engine-fast         run-engine-bg clean-engine setup-python setup-l3 run-dashboard run-dashboard-bg         run-explorer run-explorer-bg         run-harvester run-interpreter run-fusion         run-harvester-bg run-interpreter-bg run-fusion-bg         test-bridge test-e2e test-pipeline stop-pipeline stop-native healthcheck         check-ports proto proto-clean fmt-engine lint-engine docker-engine         compose-build compose-up compose-down compose-logs compose-ps         bake-build bake-list bake-prune docker-compact colima-compact         compose-up-bake compose-up-kg test-multi-domain
@@ -113,20 +113,24 @@ define wait-for-port
 endef
 
 # =============================================================================
-# Phase 11: Docker Bake Targets (Cache-Efficient Builds)
+# Phase 12: Docker Bake Targets (Cache-Efficient Builds)
 # =============================================================================
 
 bake-list: ## List all bake targets and groups
 	@echo "📋 Docker Bake targets:"
 	@docker buildx bake -f $(BAKE_FILE) --list=targets 2>/dev/null || 		echo "   (docker buildx not available or bake file missing)"
 
+# Phase 12 FIX: Per-service cache directories to prevent layer duplication
+# Each service gets its own cache dir; no wildcard globbing that duplicates layers
+BAKE_SERVICES := engine harvester interpreter fusion dashboard orchestrator audit-logger federation-bridge kg-service
+
 bake-build: ## Build all services via docker-bake.hcl (cache-efficient)
 	@echo "🔨 Building CTT services with docker-bake.hcl..."
 	@echo "   Tag: $(CTT_IMAGE_TAG)"
 	@echo "   Cache: $(CACHE_DIR)"
 	@echo "   Tip: If headers changed but build is cached, run: make bake-build-force"
-	@mkdir -p $(CACHE_DIR)/engine $(CACHE_DIR)/harvester $(CACHE_DIR)/interpreter 		$(CACHE_DIR)/fusion $(CACHE_DIR)/dashboard $(CACHE_DIR)/orchestrator 		$(CACHE_DIR)/audit-logger $(CACHE_DIR)/federation-bridge $(CACHE_DIR)/kg
-	@docker buildx bake -f $(BAKE_FILE) --load 		--allow=fs=/private/tmp 		--set *.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) 		--set *.cache-from=type=local,src=$(CACHE_DIR)/engine 		--set *.cache-to=type=local,dest=$(CACHE_DIR)/engine,mode=max
+	@mkdir -p $(CACHE_DIR)/engine $(CACHE_DIR)/harvester $(CACHE_DIR)/interpreter 		$(CACHE_DIR)/fusion $(CACHE_DIR)/dashboard $(CACHE_DIR)/orchestrator 		$(CACHE_DIR)/audit-logger $(CACHE_DIR)/federation-bridge $(CACHE_DIR)/kg-service
+	@docker buildx bake -f $(BAKE_FILE) --load 		--allow=fs=/private/tmp 		--set *.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)
 	@echo "✅ Bake build complete (tag: $(CTT_IMAGE_TAG))"
 
 bake-build-force: ## Force rebuild all services (no cache — use after header changes)
@@ -140,10 +144,19 @@ bake-build-%: ## Build specific service via bake (e.g., make bake-build-engine)
 	@docker buildx bake -f $(BAKE_FILE) --load $* 		--allow=fs=/private/tmp 		--set $*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)
 	@echo "✅ $* built (tag: $(CTT_IMAGE_TAG))"
 
+# Phase 12 FIX: Aggressive cache pruning — removes old unused layers
 bake-prune: ## Prune Docker builder cache (frees disk without destroying images)
 	@echo "🧹 Pruning Docker builder cache..."
 	@docker builder prune -f --filter unused-for=24h
 	@echo "✅ Builder cache pruned"
+
+# Phase 12 NEW: Deep cache cleanup — removes ALL build cache (use when bloat >10GB)
+bake-prune-deep: ## Deep prune: remove ALL build cache (reclaims maximum disk)
+	@echo "💥 Deep pruning ALL build cache..."
+	@docker builder prune -f
+	@rm -rf $(CACHE_DIR)/*
+	@echo "✅ All build cache removed"
+	@make docker-df
 
 # =============================================================================
 # Phase 11: Docker Compose with Bake Integration
@@ -409,7 +422,8 @@ test-bridge: ## Launch full data pipeline in background + run E2E test
 	@echo ""
 	@echo "✅ Pipeline active (engine + interpreter + fusion). Stabilizing for 5s..."
 	@sleep 5
-	@make test-e2e || (echo "\n💥 Test failed. Cleaning up..." && make stop-native && exit 1)
+	@make test-e2e || (echo "
+💥 Test failed. Cleaning up..." && make stop-native && exit 1)
 	@make stop-native
 	@echo ""
 	@echo "🎉 Full pipeline test complete."
@@ -476,7 +490,7 @@ docker-df: ## Show Docker disk usage (images, containers, volumes, build cache)
 	@docker system df
 	@echo ""
 	@echo "📊 Image breakdown (top 10 by size):"
-	@docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | sort -k3 -rh | head -10
+	@docker images --format "table {{.Repository}}	{{.Tag}}	{{.Size}}" | sort -k3 -rh | head -10
 	@echo ""
 	@echo "🧹 Reclaimable space:"
 	@docker system df -v 2>/dev/null | grep -E "RECLAIMABLE|Images|Containers|Volumes|Build Cache" || docker system df

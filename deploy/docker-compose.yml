@@ -265,6 +265,33 @@ services:
         limits:
           memory: 128M
 
+  # ---------------------------------------------------------------------------
+  # Phase 12 — L7 Knowledge Graph Service
+  # ---------------------------------------------------------------------------
+  l7-kg:
+    build:
+      context: ..
+      dockerfile: services/l7-kg/Dockerfile
+    container_name: ctt-l7-kg
+    ports:
+      - "5565:5565"
+      - "5566:5566"
+    environment:
+      - CTT_KG_PUB=tcp://*:5565
+      - CTT_KG_SUB=tcp://localhost:5566
+      - CTT_L1_ENGINE_HOST=engine
+      - PYTHONPATH=/app/services/config:/app/services/l7-kg
+    networks:
+      - ctt
+    depends_on:
+      engine:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
 networks:
   ctt:
     driver: bridge

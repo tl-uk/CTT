@@ -9,6 +9,7 @@
 #pragma once
 #include <string>
 #include <cstdint>
+#include "ssn_experience_component.h"
 
 namespace CTT {
 

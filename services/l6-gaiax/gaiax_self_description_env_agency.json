@@ -1,0 +1,95 @@
+{
+  "@context": [
+    "https://www.w3.org/2018/credentials/v1",
+    "https://w3id.org/gaia-x/development"
+  ],
+  "type": [
+    "VerifiablePresentation",
+    "GaiaXSelfDescription"
+  ],
+  "verifiableCredential": [
+    {
+      "@context": [
+        "https://www.w3.org/2018/credentials/v1"
+      ],
+      "type": [
+        "VerifiableCredential",
+        "GaiaXLegalPerson"
+      ],
+      "id": "did:web:environment-agency.gov.uk.ctt.env.com",
+      "issuer": "did:web:environment-agency.gov.uk.ctt.env.com",
+      "issuanceDate": "2026-06-01T00:00:00Z",
+      "credentialSubject": {
+        "id": "did:web:environment-agency.gov.uk.ctt.env.com",
+        "gx:type": "gx:LegalPerson",
+        "gx:name": "Environment Agency UK \u2014 CTT Health Node",
+        "gx:description": "CTT edge node for air quality health impact modelling, QALY tracking, and respiratory risk assessment from transport decarbonisation.",
+        "gx:countryCode": "GB",
+        "gx:location": {
+          "gx:latitude": 51.5074,
+          "gx:longitude": -0.1278
+        },
+        "gx:serviceOffering": [
+          {
+            "gx:id": "urn:ctt:service:health:env",
+            "gx:name": "EA Air Quality Health Impact Feed",
+            "gx:description": "Real-time NO2, PM2.5, and PM10 health impact modelling for transport corridors. Provides QALY delta estimates from modal shift policies.",
+            "gx:dataAccountExport": {
+              "gx:requestType": "API",
+              "gx:accessType": "digital",
+              "gx:formatType": "application/json"
+            }
+          },
+          {
+            "gx:id": "urn:ctt:service:policy:env",
+            "gx:name": "EA Health Policy Ingest",
+            "gx:description": "Accepts health-oriented structural policies (low-emission zones, idling restrictions) from DfT and models population-level health outcomes.",
+            "gx:dataAccountExport": {
+              "gx:requestType": "ZMQ_SUB",
+              "gx:accessType": "digital",
+              "gx:formatType": "application/json"
+            }
+          }
+        ],
+        "gx:policy": {
+          "odrl:hasPolicy": {
+            "@type": "odrl:Agreement",
+            "odrl:uid": "urn:ctt:policy:env-health-data-only",
+            "odrl:profile": "https://w3id.org/ctt/odrl-profile",
+            "odrl:permission": [
+              {
+                "odrl:action": "odrl:use",
+                "odrl:constraint": [
+                  {
+                    "odrl:leftOperand": "odrl:purpose",
+                    "odrl:operator": "odrl:eq",
+                    "odrl:rightOperand": "public_health_modelling"
+                  }
+                ]
+              }
+            ],
+            "odrl:prohibition": [
+              {
+                "odrl:action": "odrl:share",
+                "odrl:constraint": [
+                  {
+                    "odrl:leftOperand": "odrl:recipient",
+                    "odrl:operator": "odrl:neq",
+                    "odrl:rightOperand": "ctt_federation_peer"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "proof": {
+    "type": "Ed25519Signature2020",
+    "created": "2026-06-01T00:00:00Z",
+    "proofPurpose": "assertionMethod",
+    "verificationMethod": "did:web:environment-agency.gov.uk.ctt.env.com#key-1",
+    "proofValue": "zEnvAgencySignaturePlaceholder..."
+  }
+}

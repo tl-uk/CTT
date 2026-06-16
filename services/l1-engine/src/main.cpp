@@ -19,12 +19,19 @@ std::atomic<bool> g_running{true};
  */
 void zmq_thread_func(CTT::DataBridge* bridge,
                      CTT::ThreadSafePerturbationQueue* pert_queue,
-                     CTT::ThreadSafeTelemetryBuffer* tele_buffer) {
+                     CTT::ThreadSafeTelemetryBuffer* tele_buffer,
+                     CTT::ThreadSafeKGMatchQueue* kg_match_queue) {
     std::cout << "[L2 Bridge] ZMQ I/O thread started" << std::endl;
 
     while (g_running && bridge->running()) {
         // 1. Poll incoming perturbations from Python pipeline (non-blocking)
         bridge->poll_perturbations(*pert_queue);
+
+        // 1b. Poll KG matches from L7 Knowledge Graph (non-blocking)
+        auto kg_matches = bridge->poll_kg_matches();
+        if (!kg_matches.empty()) {
+            kg_match_queue->push_all(std::move(kg_matches));
+        }
 
         // 2. Broadcast telemetry if main thread has published a fresh snapshot
         std::string payload;
@@ -49,7 +56,13 @@ int main() {
     std::string sub_addr = "tcp://";
     sub_addr += (fusion_host ? fusion_host : "localhost");
     sub_addr += ":5556";
-    CTT::DataBridge bridge("tcp://*:5555", sub_addr);
+    // Phase 12: L7 Knowledge Graph addresses
+    const char* kg_pub_env = std::getenv("CTT_KG_PUB");
+    const char* kg_sub_env = std::getenv("CTT_KG_SUB");
+    std::string kg_pub_addr = kg_pub_env ? kg_pub_env : "tcp://*:5565";
+    std::string kg_sub_addr = kg_sub_env ? kg_sub_env : "tcp://localhost:5566";
+
+    CTT::DataBridge bridge("tcp://*:5555", sub_addr, kg_pub_addr, kg_sub_addr);
 
     engine.initialize_test_fleet();
 
@@ -61,8 +74,9 @@ int main() {
     // -----------------------------------------------------------------------
     CTT::ThreadSafePerturbationQueue pert_queue;
     CTT::ThreadSafeTelemetryBuffer tele_buffer;
+    CTT::ThreadSafeKGMatchQueue kg_match_queue;
 
-    std::thread zmq_worker(zmq_thread_func, &bridge, &pert_queue, &tele_buffer);
+    std::thread zmq_worker(zmq_thread_func, &bridge, &pert_queue, &tele_buffer, &kg_match_queue);
 
     // The Master Clock Loop — deterministic 10 Hz, isolated from ZMQ latency
     auto last_time = std::chrono::high_resolution_clock::now();
@@ -78,8 +92,24 @@ int main() {
             CTT::DataBridge::apply_perturbations(engine.get_world(), perts);
         }
 
+        // 1b. Apply KG matches (boost satisfaction for recognized contexts)
+        auto kg_matches = kg_match_queue.pop_all();
+        if (!kg_matches.empty()) {
+            CTT::DataBridge::apply_kg_matches(engine.get_world(), kg_matches);
+        }
+
         // 2. Tick the Flecs Reflexive Engine (BDI + Physics)
         engine.update(delta_time);
+
+        // 2b. Phase 12: Broadcast new SSN experiences to L7 Knowledge Graph
+        auto q_ssn = engine.get_world().query<const SSN_Experience_Component, const SocialImpactComponent>();
+        q_ssn.each([&](flecs::entity e, const SSN_Experience_Component& ssn, const SocialImpactComponent& soc) {
+            if (ssn.confidence >= 0.99f) {
+                bridge.broadcast_kg_experience(e.name().c_str(), ssn, soc.corridor_id);
+                auto* mutable_ssn = e.get_mut<SSN_Experience_Component>();
+                if (mutable_ssn) mutable_ssn->confidence = 0.95f;
+            }
+        });
 
         // 3. Snapshot world state and hand off to ZMQ thread for broadcast
         std::string snapshot = CTT::DataBridge::snapshot_world(engine.get_world());

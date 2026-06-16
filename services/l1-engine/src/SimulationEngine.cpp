@@ -4,6 +4,8 @@
 #include <random>
 #include <cmath>
 #include <cstdlib>  // for std::getenv
+#include <chrono>
+#include <random>
 
 namespace CTT {
 
@@ -152,6 +154,71 @@ void SimulationEngine::register_systems() {
                 ext.cumulative_nox_kg  += (ext.current_nox_g_km * distance_km) / 1000.0f;
                 ext.cumulative_pm25_kg += (ext.current_pm25_g_km * distance_km) / 1000.0f;
             }
+        });
+    // --- SYSTEM 6: SSN EXPERIENCE RECORDING (Phase 12) ---
+    // Triggered when OneShotSuccess tag is added (agent decarbonized)
+    // Creates a compressed SSN record for the Knowledge Graph
+    world.system<const MindsetComponent, const EnergyComponent, const PositionComponent,
+                 const ExternalitiesComponent, const SocialImpactComponent>("SSNRecordSystem")
+        .kind(flecs::OnSet)
+        .with<OneShotSuccess>()
+        .each([](flecs::iter& it, size_t i,
+                 const MindsetComponent& mindset,
+                 const EnergyComponent& energy,
+                 const PositionComponent& pos,
+                 const ExternalitiesComponent& ext,
+                 const SocialImpactComponent& soc) {
+            auto entity = it.entity(i);
+
+            // Only record if this is a genuine decarbonization event
+            if (!mindset.is_decarbonized) return;
+
+            // Generate deterministic experience_id from entity name + timestamp
+            auto now = std::chrono::system_clock::now();
+            auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now.time_since_epoch()).count();
+
+            std::hash<std::string> hasher;
+            uint64_t exp_id = static_cast<uint64_t>(hasher(entity.name().c_str())) ^ static_cast<uint64_t>(now_ms);
+
+            // Create SSN experience record
+            SSN_Experience_Component ssn;
+            ssn.experience_id = exp_id;
+            ssn.timestamp_ms = static_cast<uint64_t>(now_ms);
+            ssn.confidence = 1.0f;  // Direct observation = max confidence
+            ssn.is_one_shot_success = true;
+
+            // Generate semantic signature from context
+            std::seed_seq seed{
+                static_cast<int>(mindset.adversarial_pressure * 100),
+                static_cast<int>(energy.currentEnergyStorage),
+                static_cast<int>(pos.latitude * 10000),
+                static_cast<int>(pos.longitude * 10000),
+                static_cast<int>(ext.current_co2_g_km),
+                static_cast<int>(soc.deprivation_index * 10)
+            };
+            std::mt19937 gen(seed);
+            std::normal_distribution<float> dist(0.0f, 1.0f);
+
+            float norm_sq = 0.0f;
+            for (size_t j = 0; j < SSN_Experience_Component::VECTOR_DIM; ++j) {
+                ssn.signature[j] = dist(gen);
+                norm_sq += ssn.signature[j] * ssn.signature[j];
+            }
+            // L2 normalize
+            float norm = std::sqrt(norm_sq);
+            if (norm > 0.0f) {
+                for (size_t j = 0; j < SSN_Experience_Component::VECTOR_DIM; ++j) {
+                    ssn.signature[j] /= norm;
+                }
+            }
+
+            entity.set<SSN_Experience_Component>(ssn);
+
+            std::cout << "[L7-KG] 🧠 SSN recorded for " << entity.name() 
+                      << " (exp_id=" << exp_id 
+                      << ", corridor=" << soc.corridor_id 
+                      << ", decarbonized=true)" << std::endl;
         });
 }
 
@@ -372,6 +439,14 @@ void CTT::SimulationEngine::register_reflection() {
         // REMOVED: .member<std::string>("corridor_id");
         // Flecs has no built-in serializer for std::string.
         // DataBridge.cpp handles JSON serialization manually.
+
+    // Phase 12: SSN Experience Component reflection (128-dim vector as opaque)
+    world.component<SSN_Experience_Component>()
+        .member<uint64_t>("experience_id")
+        .member<uint64_t>("timestamp_ms")
+        .member<float>("confidence")
+        .member<bool>("is_one_shot_success");
+        // Note: signature[128] is not reflected — handled by DataBridge JSON serialization
 }
 
 } // namespace CTT

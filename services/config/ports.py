@@ -36,13 +36,17 @@ ZMQ_PORTS = {
     "INTERPRETER_PUB": "tcp://*:5561",
     "INTERPRETER_SUB": f"tcp://{_INTERPRETER_HOST}:5561",
 
-    # Phase 6 — L5 Policy Bridge (structural feedback to L2/L3)
+    # Policy Bridge (structural feedback to L2/L3)
     "POLICY_PUB": "tcp://*:5563",
     "POLICY_SUB": f"tcp://{_POLICY_HOST}:5563",
 
-    # Phase 6.5 — L2 Orchestrator (tactical policies, separate from structural L5)
+    # Orchestrator (tactical policies, separate from structural L5)
     "TACTICAL_PUB": "tcp://*:5564",
     "TACTICAL_SUB": f"tcp://{_TACTICAL_HOST}:5564",
+
+    # Phase 12 — L7 Knowledge Graph
+    "KG_PUB": "tcp://*:5565",
+    "KG_SUB": "tcp://localhost:5566",
 
     # Legacy / Direct (deprecated, non-conflicting)
     "LEGACY_INGESTOR_PUB": "tcp://*:5562",

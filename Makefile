@@ -422,8 +422,7 @@ test-bridge: ## Launch full data pipeline in background + run E2E test
 	@echo ""
 	@echo "✅ Pipeline active (engine + interpreter + fusion). Stabilizing for 5s..."
 	@sleep 5
-	@make test-e2e || (echo "
-💥 Test failed. Cleaning up..." && make stop-native && exit 1)
+	@make test-e2e || (echo "💥 Test failed. Cleaning up..." && make stop-native && exit 1)
 	@make stop-native
 	@echo ""
 	@echo "🎉 Full pipeline test complete."

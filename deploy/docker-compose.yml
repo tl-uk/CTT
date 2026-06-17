@@ -283,6 +283,12 @@ services:
       - PYTHONPATH=/app/services/config:/app/services/l7-kg
     networks:
       - ctt
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import zmq; print('ok')\" || exit 1"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3  
     depends_on:
       engine:
         condition: service_healthy

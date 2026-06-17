@@ -5,7 +5,7 @@
 \red191\green191\blue191;\red0\green0\blue0;}
 {\*\expandedcolortbl;;\cssrgb\c0\c0\c0\c90196;\cssrgb\c100000\c100000\c100000;\csgray\c79525;
 \csgray\c79525;\cssrgb\c0\c0\c0\c90196;}
-\paperw11900\paperh16840\margl1440\margr1440\vieww19800\viewh9380\viewkind0
+\paperw11900\paperh16840\margl1440\margr1440\vieww19220\viewh8180\viewkind0
 \deftab720
 \pard\pardeftab720\sa320\partightenfactor0
 
@@ -422,7 +422,10 @@ done\cell
 \pard\intbl\itap1\pardeftab720\partightenfactor0
 \cf0 `make colima-nuke`\cell 
 \pard\intbl\itap1\pardeftab720\partightenfactor0
-\cf0 Destroys VM, reclaims all disk\cell \row
+\cf0 Destroys VM, reclaims all disk\
+\
+# Weekly -resets everything and prevents gradual accumulation\
+make colima-nuke && make bake-build-force && make compose-up-kg\cell \row
 
 \itap1\trowd \taflags1 \trgaph108\trleft-108 \trbrdrl\brdrnil \trbrdrt\brdrnil \trbrdrr\brdrnil 
 \clvertalc \clshdrawnil \clbrdrt\brdrs\brdrw20\brdrcf5 \clbrdrl\brdrs\brdrw20\brdrcf5 \clbrdrb\brdrs\brdrw20\brdrcf5 \clbrdrr\brdrs\brdrw20\brdrcf5 \clpadl100 \clpadr100 \gaph\cellx2880
@@ -440,9 +443,25 @@ docker ps | grep ctt-\cell
 
 \f0\b\fs40 \cf2 \cb3 \expnd0\expndtw0\kerning0
 \
+
+\itap1\trowd \taflags1 \trgaph108\trleft-108 \trbrdrt\brdrnil \trbrdrl\brdrnil \trbrdrt\brdrnil \trbrdrr\brdrnil 
+\clvertalt \clshdrawnil \clbrdrt\brdrs\brdrw20\brdrcf5 \clbrdrl\brdrs\brdrw20\brdrcf5 \clbrdrb\brdrs\brdrw20\brdrcf5 \clbrdrr\brdrs\brdrw20\brdrcf5 \clpadl100 \clpadr100 \gaph\cellx8640
+\pard\intbl\itap1\pardeftab720\sa320\partightenfactor0
+
+\f1\b0\fs24 \cf2 # Clear all docker cache and redeploy\
+# 1. Stop everything\
+make compose-down\
+# 2. Clear bake cache dirs (not just builder cache)\
+rm -rf /tmp/ctt-docker-cache/*\
+# 3. Force rebuild with NO cache\
+make bake-build-force\
+# 4. Deploy\
+make compose-up-kg
+\f0\b\fs40 \cf2 \cell \lastrow\row
 \pard\pardeftab720\partightenfactor0
 
-\f3\b0\fs32 \cf6 \cb3 \outl0\strokewidth0 \strokec6 The E2E test is primarily for 
+\f3\b0\fs32 \cf6 \cb3 \outl0\strokewidth0 \strokec6 \
+The E2E test is primarily for 
 \f4\b Docker-based multi-domain federation
 \f3\b0 . For single-domain native development, manual curl verification is sufficient.\
 

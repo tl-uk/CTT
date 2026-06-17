@@ -70,16 +70,16 @@ help: ## Show this help message
 	@echo "╚══════════════════════════════════════════════════════════════╝"
 	@echo ""
 	@echo "═══ Native Build ═══"
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}' | grep -E "(check-deps|build-engine|run-engine|setup-python|setup-l3|setup-l5|setup-l7)"
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \		awk 'BEGIN {FS = ":.*?## "}; {printf "  \\033[36m%-24s\\033[0m %s\\n", $$1, $$2}' | grep -E "(check-deps|build-engine|run-engine|setup-python|setup-l3|setup-l5|setup-l7)"
 	@echo ""
 	@echo "═══ Docker / Bake (Phase 11) ═══"
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}' | grep -E "(bake-|docker-|compose-|colima-)"
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \		awk 'BEGIN {FS = ":.*?## "}; {printf "  \\033[36m%-24s\\033[0m %s\\n", $$1, $$2}' | grep -E "(bake-|docker-|compose-|colima-)"
 	@echo ""
 	@echo "═══ Testing ═══"
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}' | grep -E "(test-|healthcheck|check-ports)"
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \		awk 'BEGIN {FS = ":.*?## "}; {printf "  \\033[36m%-24s\\033[0m %s\\n", $$1, $$2}' | grep -E "(test-|healthcheck|check-ports)"
 	@echo ""
 	@echo "═══ Disk Management ═══"
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}' | grep -E "(prune|compact|nuke|df)"
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \		awk 'BEGIN {FS = ":.*?## "}; {printf "  \\033[36m%-24s\\033[0m %s\\n", $$1, $$2}' | grep -E "(prune|compact|nuke|df)"
 	@echo ""
 	@echo "Quick start (native):"
 	@echo "  1. make check-deps     → Verify dependencies"
@@ -130,18 +130,19 @@ bake-build: ## Build all services via docker-bake.hcl (cache-efficient, mode=min
 	@echo "   Cache: $(CACHE_DIR) (mode=min — no intermediate layer bloat)"
 	@echo "   Tip: If headers changed but build is cached, run: make bake-build-force"
 	@mkdir -p $(CACHE_DIR)/engine $(CACHE_DIR)/harvester $(CACHE_DIR)/interpreter \		$(CACHE_DIR)/fusion $(CACHE_DIR)/dashboard $(CACHE_DIR)/orchestrator \		$(CACHE_DIR)/audit-logger $(CACHE_DIR)/federation-bridge $(CACHE_DIR)/kg-service
-	@docker buildx bake -f $(BAKE_FILE) --load \		--allow=fs=/private/tmp \		--set *.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)
+	@docker buildx bake -f $(BAKE_FILE) --load \		--allow=fs=/private/tmp \		--set "*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)"
 	@echo "✅ Bake build complete (tag: $(CTT_IMAGE_TAG))"
 
+# Phase 12 FIX: Force rebuild with explicit target list (avoids empty target error)
 bake-build-force: ## Force rebuild all services (no cache — use after header changes)
 	@echo "🔨 Force-building CTT services (no cache)..."
-	@docker buildx bake -f $(BAKE_FILE) --load --no-cache \		--allow=fs=/private/tmp \		--set *.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)
+	@docker buildx bake -f $(BAKE_FILE) --load \		--no-cache \		--allow=fs=/private/tmp \		--set "*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)" \		$(BAKE_SERVICES)
 	@echo "✅ Force build complete (tag: $(CTT_IMAGE_TAG))"
 
 bake-build-%: ## Build specific service via bake (e.g., make bake-build-engine)
 	@echo "🔨 Building service: $* (tag: $(CTT_IMAGE_TAG))"
 	@mkdir -p $(CACHE_DIR)/$*
-	@docker buildx bake -f $(BAKE_FILE) --load $* \		--allow=fs=/private/tmp \		--set $*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)
+	@docker buildx bake -f $(BAKE_FILE) --load $* \		--allow=fs=/private/tmp \		--set "$*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)"
 	@echo "✅ $* built (tag: $(CTT_IMAGE_TAG))"
 
 # Phase 12 FIX: Prune only removes unused cache; does not touch bake cache dirs
@@ -171,7 +172,7 @@ compose-up-bake: bake-build ## Build via bake, then launch full stack
 
 compose-up-kg: bake-build ## Build via bake (including L7-KG), then launch
 	@echo "🚀 Starting CTT stack + L7 Knowledge Graph (tag: $(CTT_IMAGE_TAG))..."
-	@docker buildx bake -f $(BAKE_FILE) --load kg-service \		--set kg-service.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)
+	@docker buildx bake -f $(BAKE_FILE) --load kg-service \		--set "kg-service.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)"
 	@CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) docker-compose -f $(COMPOSE_FILE) up -d
 	@echo "✅ Stack + KG started. Dashboard: http://localhost:5001"
 
@@ -493,7 +494,7 @@ docker-df: ## Show Docker disk usage (images, containers, volumes, build cache)
 	@docker system df
 	@echo ""
 	@echo "📊 Image breakdown (top 10 by size):"
-	@docker images --format "table {{.Repository}}	{{.Tag}}	{{.Size}}" | sort -k3 -rh | head -10
+	@docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | sort -k3 -rh | head -10
 	@echo ""
 	@echo "🧹 Reclaimable space:"
 	@docker system df -v 2>/dev/null | grep -E "RECLAIMABLE|Images|Containers|Volumes|Build Cache" || docker system df
@@ -562,7 +563,7 @@ colima-nuke: ## Full Lima store reset (fixes _disks bloat)
 
 fmt-engine: ## Format C++ source files (requires clang-format)
 	@echo "🎨 Formatting C++ sources..."
-	@find $(L1_DIR)/src $(L1_DIR)/include -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) | \		xargs clang-format -i -style=file 2>/dev/null || \		echo "⚠️  clang-format not installed."
+	@find $(L1_DIR)/src $(L1_DIR)/include -type f \\( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \\) | \		xargs clang-format -i -style=file 2>/dev/null || \		echo "⚠️  clang-format not installed."
 
 clean-all: clean-engine ## Clean everything (builds + Python envs + Docker cache)
 	@echo "🧹 Cleaning Python environments..."

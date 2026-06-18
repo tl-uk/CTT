@@ -1,6 +1,7 @@
-# services/l1-engine/Dockerfile
-# CTT L1 Engine — Multi-stage build with PCH and ccache support
+# =============================================================================
+# CTT L1 Engine --- Multi-stage build with PCH and ccache support
 # Phase 12: Added services/l7-kg/include/ to build context for SSN_Experience_Component
+# =============================================================================
 
 # =============================================================================
 # Builder stage
@@ -26,8 +27,8 @@ COPY Makefile /build/
 # This ensures cmake detects header changes even if build/ directory is cached
 RUN touch /build/services/l7-kg/include/ssn_experience_component.h && \
     cmake -B /build/services/l1-engine/build -S /build/services/l1-engine -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     && cmake --build /build/services/l1-engine/build --parallel $(nproc)
 
 # =============================================================================

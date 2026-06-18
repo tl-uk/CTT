@@ -122,7 +122,7 @@ bake-list: ## List all bake targets and groups
 
 # Phase 12 FIX: Per-service cache directories with mode=min to prevent bloat
 # mode=min only caches final layers, not intermediate build stages
-BAKE_SERVICES := engine harvester interpreter fusion dashboard orchestrator audit-logger federation-bridge kg-service
+BAKE_SERVICES := engine harvester interpreter fusion dashboard orchestrator l5-macro kg-service
 
 bake-build: ## Build all services via docker-bake.hcl (cache-efficient, mode=min)
 	@echo "🔨 Building CTT services with docker-bake.hcl..."
@@ -137,13 +137,12 @@ bake-build: ## Build all services via docker-bake.hcl (cache-efficient, mode=min
 bake-build-force: ## Force rebuild all services (no cache — use after header changes)
 	@echo "🔨 Force-building CTT services (no cache)..."
 	@rm -rf $(CACHE_DIR)/*
-	@docker buildx bake -f $(BAKE_FILE) --load --set "*.no-cache=true" --set "*.cache-from=" --allow=fs=/private/tmp --set "*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)" $(BAKE_SERVICES)
+	@docker buildx bake -f $(BAKE_FILE) --load --set "*.no-cache=true" --set "*.cache-from=" --allow=fs=/private/tmp --set "*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)" all-with-kg
 	@echo "✅ Force build complete (tag: $(CTT_IMAGE_TAG))"
-
 bake-build-%: ## Build specific service via bake (e.g., make bake-build-engine)
 	@echo "🔨 Building service: $* (tag: $(CTT_IMAGE_TAG))"
 	@mkdir -p $(CACHE_DIR)/$*
-	@docker buildx bake -f $(BAKE_FILE) --load $* --allow=fs=/private/tmp --set "$*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)"
+	@docker buildx bake -f $(BAKE_FILE) --load $* \		--allow=fs=/private/tmp \		--set "$*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)"
 	@echo "✅ $* built (tag: $(CTT_IMAGE_TAG))"
 
 
@@ -184,6 +183,7 @@ compose-up-bake: bake-build ## Build via bake, then launch full stack
 compose-up-kg: bake-build-force ## Build via bake (force, no cache), then launch
 	@echo "🚀 Starting CTT stack + L7 Knowledge Graph (tag: $(CTT_IMAGE_TAG))..."
 	@docker buildx bake -f $(BAKE_FILE) --load kg-service --set "kg-service.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)"
+	@CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) docker-compose -f $(COMPOSE_FILE) build --no-cache engine
 	@CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) docker-compose -f $(COMPOSE_FILE) up -d
 	@echo "✅ Stack + KG started. Dashboard: http://localhost:5001"
 # Phase 12 FIX: compose-down now auto-prunes to prevent disk bloat

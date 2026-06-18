@@ -1,6 +1,6 @@
 # CTT Project Structure
 
-**Generated:** Tue Jun 16 08:25:57 BST 2026
+**Generated:** Thu Jun 18 08:20:25 BST 2026
 
 ```
 └── CTT
@@ -97,12 +97,15 @@
         │   ├── README.md
         │   ├── edc-deployment.yaml
         │   ├── edc_gateway.py
+        │   ├── gaiax_self_description_beis.json
+        │   ├── gaiax_self_description_env_agency.json
         │   ├── policy_enforcer.py
         │   ├── requirements.txt
         │   ├── self-descriptions
         │   │   └── gaiax_self_description_dhl_express.json
         │   └── self_description.json
         └── l7-kg
+            ├── Dockerfile
             ├── README.md
             ├── include
             │   └── ssn_experience_component.h

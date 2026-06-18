@@ -104,12 +104,12 @@ help: ## Show this help message
 # =============================================================================
 
 define check-port-free
-	@if lsof -i :$(1) >/dev/null 2>&1; then \		echo "❌ Port $(1) already in use. Run 'make stop-native' first."; \		exit 1; \	else \		echo "✅ Port $(1) is free for $(2)"; \	fi
+	@if lsof -i :$(1) >/dev/null 2>&1; then echo "❌ Port $(1) already in use. Run make stop-native first."; exit 1; else echo "✅ Port $(1) is free for $(2)"; fi
 endef
 
 define wait-for-port
 	@echo "⏳ Waiting for $(2) to bind port $(1)..."
-	@for i in $$(seq 1 25); do \		if nc -z localhost $(1) 2>/dev/null; then \			echo "✅ $(2) is listening on $(1)"; \			exit 0; \		fi; \		sleep 0.2; \	done; \	echo "❌ $(2) failed to bind port $(1) within 5s"; \	exit 1
+	@for i in $$(seq 1 25); do if nc -z localhost $(1) 2>/dev/null; then echo "✅ $(2) is listening on $(1)"; exit 0; fi; sleep 0.2; done; echo "❌ $(2) failed to bind port $(1) within 5s"; exit 1
 endef
 
 # =============================================================================
@@ -136,14 +136,25 @@ bake-build: ## Build all services via docker-bake.hcl (cache-efficient, mode=min
 # Phase 12 FIX: Force rebuild with explicit target list (avoids empty target error)
 bake-build-force: ## Force rebuild all services (no cache — use after header changes)
 	@echo "🔨 Force-building CTT services (no cache)..."
-	@docker buildx bake -f $(BAKE_FILE) --load \		--no-cache \		--allow=fs=/private/tmp \		--set "*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)" \		$(BAKE_SERVICES)
+	@rm -rf $(CACHE_DIR)/*
+	@docker buildx bake -f $(BAKE_FILE) --load --set "*.no-cache=true" --set "*.cache-from=" --allow=fs=/private/tmp --set "*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)" $(BAKE_SERVICES)
 	@echo "✅ Force build complete (tag: $(CTT_IMAGE_TAG))"
 
 bake-build-%: ## Build specific service via bake (e.g., make bake-build-engine)
 	@echo "🔨 Building service: $* (tag: $(CTT_IMAGE_TAG))"
 	@mkdir -p $(CACHE_DIR)/$*
-	@docker buildx bake -f $(BAKE_FILE) --load $* \		--allow=fs=/private/tmp \		--set "$*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)"
+	@docker buildx bake -f $(BAKE_FILE) --load $* --allow=fs=/private/tmp --set "$*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)"
 	@echo "✅ $* built (tag: $(CTT_IMAGE_TAG))"
+
+
+# Phase 12 NEW: Validate engine image has required runtime dependencies
+validate-engine-image: ## Verify ctt-engine image has nc and libflecs.so
+	@echo "🔍 Validating ctt-engine image..."
+	@nc_check=$$(docker run --rm ctt-engine:$(CTT_IMAGE_TAG) which nc 2>/dev/null) || true
+	@flecs_check=$$(docker run --rm ctt-engine:$(CTT_IMAGE_TAG) ldd /app/CTT_Engine 2>/dev/null | grep flecs) || true
+	@if [ -z "$$nc_check" ]; then echo "❌ nc MISSING"; echo "   Run: make bake-build-force"; exit 1; fi
+	@if [ -z "$$flecs_check" ]; then echo "❌ libflecs.so MISSING"; echo "   Run: make bake-build-force"; exit 1; fi
+	@echo "✅ Engine validated: nc=$$nc_check, flecs=$$flecs_check"
 
 # Phase 12 FIX: Prune only removes unused cache; does not touch bake cache dirs
 bake-prune: ## Prune Docker builder cache (frees disk without destroying images)
@@ -155,10 +166,10 @@ bake-prune: ## Prune Docker builder cache (frees disk without destroying images)
 bake-prune-deep: ## Deep prune: remove ALL build cache + bake cache dirs (emergency)
 	@echo "💥 Deep pruning ALL build cache..."
 	@docker builder prune -f
+	@docker system prune -f --volumes 2>/dev/null || true
 	@rm -rf $(CACHE_DIR)/*
-	@echo "✅ All build cache removed (including bake cache dirs)"
+	@echo "✅ All build cache removed (builder + bake dirs + dangling)"
 	@make docker-df
-
 # =============================================================================
 # Phase 11: Docker Compose with Bake Integration
 # =============================================================================
@@ -170,20 +181,19 @@ compose-up-bake: bake-build ## Build via bake, then launch full stack
 	@CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) docker-compose -f $(COMPOSE_FILE) up -d
 	@echo "✅ Stack started. Dashboard: http://localhost:5001"
 
-compose-up-kg: bake-build ## Build via bake (including L7-KG), then launch
+compose-up-kg: bake-build-force ## Build via bake (force, no cache), then launch
 	@echo "🚀 Starting CTT stack + L7 Knowledge Graph (tag: $(CTT_IMAGE_TAG))..."
-	@docker buildx bake -f $(BAKE_FILE) --load kg-service \		--set "kg-service.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)"
+	@docker buildx bake -f $(BAKE_FILE) --load kg-service --set "kg-service.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)"
 	@CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) docker-compose -f $(COMPOSE_FILE) up -d
 	@echo "✅ Stack + KG started. Dashboard: http://localhost:5001"
-
 # Phase 12 FIX: compose-down now auto-prunes to prevent disk bloat
 compose-down: ## Stop and remove CTT stack + prune builder cache
 	@echo "🛑 Stopping CTT stack..."
 	@docker-compose -f $(COMPOSE_FILE) down
 	@echo "🧹 Pruning builder cache..."
 	@docker builder prune -f --filter unused-for=24h
+	@rm -rf $(CACHE_DIR)/*
 	@echo "✅ Stack stopped + cache pruned"
-
 compose-build: ## Build all services via docker-compose (fallback, no bake)
 	@echo "🔨 Building CTT stack via docker-compose..."
 	@CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) docker-compose -f $(COMPOSE_FILE) build
@@ -410,9 +420,8 @@ healthcheck: ## Quick check: are all expected ports listening?
 	@echo "────────────────────────────────────────"
 	@echo "Component          | Port | Status"
 	@echo "────────────────────────────────────────"
-	@for port in 5555 5556 5560 5561 5001; do \		if nc -z localhost $$port 2>/dev/null; then \			status="✅ UP"; \		else \			status="⬜ DOWN"; \		fi; \		case $$port in \			5555) echo "L1 Engine (telemetry) | 5555 | $$status" ;; \			5556) echo "Fusion (perturbations)| 5556 | $$status" ;; \			5560) echo "Harvester (raw data)  | 5560 | $$status" ;; \			5561) echo "Interpreter (mapped)  | 5561 | $$status" ;; \			5001) echo "Dashboard (REST API)  | 5001 | $$status" ;; \		esac; \	done
+	@for port in 5555 5556 5560 5561 5001; do if nc -z localhost $$port 2>/dev/null; then status="✅ UP"; else status="⬜ DOWN"; fi; case $$port in 5555) echo "L1 Engine (telemetry) | 5555 | $$status" ;; 5556) echo "Fusion (perturbations)| 5556 | $$status" ;; 5560) echo "Harvester (raw data)  | 5560 | $$status" ;; 5561) echo "Interpreter (mapped)  | 5561 | $$status" ;; 5001) echo "Dashboard (REST API)  | 5001 | $$status" ;; esac; done
 	@echo "────────────────────────────────────────"
-
 test-e2e: ## Run end-to-end pipeline test (requires engine running)
 	@echo "🧪 Running end-to-end pipeline test..."
 	@cd $(L2_DIR) && . .venv/bin/activate && PYTHONPATH="$(CONFIG_DIR):../data-pipeline/fusion" python ../../scripts/test_e2e.py --mode standalone

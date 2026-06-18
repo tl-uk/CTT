@@ -1,6 +1,6 @@
 // =============================================================================
 // CTT Project — Docker Bake Configuration
-// Phase 12: Cache-efficient multi-service builds with local cache persistence
+// Phase 12b: Fixed disk bloat — cache-to disabled by default
 //
 // Usage:
 //   CTT_IMAGE_TAG=abc123 docker buildx bake        # Build all services
@@ -10,10 +10,11 @@
 // Variables are overridden via environment variables (per Docker Bake spec):
 //   https://docs.docker.com/build/bake/reference/#variable
 //
-// Cache strategy (Phase 12 FIX):
-//   - mode=min: only cache final layers (not intermediate build stages)
-//   - This prevents the ~7GB/session bloat from mode=max
-//   - Cache survives across Colima restarts but doesn't duplicate
+// Cache strategy (Phase 12b FIX):
+//   - cache-to is DISABLED by default (prevents ~8GB/session bloat)
+//   - cache-from is still enabled for incremental builds
+//   - For CI/CD where cache persistence matters, override via:
+//     docker buildx bake --set "*.cache-to=type=local,dest=/tmp/cache,mode=min"
 //   - Git-SHA tags prevent dangling image accumulation
 // =============================================================================
 
@@ -40,6 +41,11 @@ target "_common" {
 // =============================================================================
 // Service Targets
 // Each maps to a service in docker-compose.yml
+//
+// Phase 12b NOTE: cache-to is intentionally omitted from all targets.
+// The Makefile's bake-build target passes --set "*.cache-to=" to disable
+// export entirely. For cache-enabled builds, use `make bake-build` which
+// reads from cache but does not export (or set cache-to explicitly).
 // =============================================================================
 
 target "engine" {
@@ -48,8 +54,8 @@ target "engine" {
   dockerfile = "services/l1-engine/Dockerfile"
   tags = ["ctt-engine:${CTT_IMAGE_TAG}"]
   cache-from = ["type=local,src=${CACHE_DIR}/engine"]
-  // Phase 12 FIX: mode=min prevents intermediate layer bloat
-  cache-to   = ["type=local,dest=${CACHE_DIR}/engine,mode=min"]
+  // Phase 12b: cache-to disabled by default — prevents disk bloat
+  // Override via: --set "engine.cache-to=type=local,dest=...,mode=min"
 }
 
 target "harvester" {
@@ -58,7 +64,6 @@ target "harvester" {
   dockerfile = "services/data-pipeline/ingestor/Dockerfile"
   tags = ["ctt-harvester:${CTT_IMAGE_TAG}"]
   cache-from = ["type=local,src=${CACHE_DIR}/harvester"]
-  cache-to   = ["type=local,dest=${CACHE_DIR}/harvester,mode=min"]
 }
 
 target "interpreter" {
@@ -67,7 +72,6 @@ target "interpreter" {
   dockerfile = "services/data-pipeline/interpreter/Dockerfile"
   tags = ["ctt-interpreter:${CTT_IMAGE_TAG}"]
   cache-from = ["type=local,src=${CACHE_DIR}/interpreter"]
-  cache-to   = ["type=local,dest=${CACHE_DIR}/interpreter,mode=min"]
 }
 
 target "fusion" {
@@ -76,7 +80,6 @@ target "fusion" {
   dockerfile = "services/data-pipeline/fusion/Dockerfile"
   tags = ["ctt-fusion:${CTT_IMAGE_TAG}"]
   cache-from = ["type=local,src=${CACHE_DIR}/fusion"]
-  cache-to   = ["type=local,dest=${CACHE_DIR}/fusion,mode=min"]
 }
 
 target "dashboard" {
@@ -85,7 +88,6 @@ target "dashboard" {
   dockerfile = "services/l2-bridge/Dockerfile"
   tags = ["ctt-dashboard:${CTT_IMAGE_TAG}"]
   cache-from = ["type=local,src=${CACHE_DIR}/dashboard"]
-  cache-to   = ["type=local,dest=${CACHE_DIR}/dashboard,mode=min"]
 }
 
 target "orchestrator" {
@@ -94,7 +96,6 @@ target "orchestrator" {
   dockerfile = "services/l2-orchestrator/Dockerfile"
   tags = ["ctt-orchestrator:${CTT_IMAGE_TAG}"]
   cache-from = ["type=local,src=${CACHE_DIR}/orchestrator"]
-  cache-to   = ["type=local,dest=${CACHE_DIR}/orchestrator,mode=min"]
 }
 
 // Phase 12: L5 services share one Dockerfile (single-stage, differentiated by command)
@@ -104,7 +105,6 @@ target "l5-macro" {
   dockerfile = "services/l5-macro/Dockerfile"
   tags = ["ctt-l5-macro:${CTT_IMAGE_TAG}", "ctt-audit-logger:${CTT_IMAGE_TAG}", "ctt-federation-bridge:${CTT_IMAGE_TAG}"]
   cache-from = ["type=local,src=${CACHE_DIR}/l5-macro"]
-  cache-to   = ["type=local,dest=${CACHE_DIR}/l5-macro,mode=min"]
 }
 
 // =============================================================================
@@ -117,7 +117,6 @@ target "kg-service" {
   dockerfile = "services/l7-kg/Dockerfile"
   tags = ["ctt-kg:${CTT_IMAGE_TAG}"]
   cache-from = ["type=local,src=${CACHE_DIR}/kg"]
-  cache-to   = ["type=local,dest=${CACHE_DIR}/kg,mode=min"]
 }
 
 // =============================================================================

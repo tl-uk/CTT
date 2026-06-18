@@ -151,29 +151,7 @@ bake-build-%: ## Build specific service via bake (e.g., make bake-build-engine)
 # Phase 12 NEW: Validate engine image has required runtime dependencies
 validate-engine-image: ## Verify ctt-engine image has nc and libflecs.so
 	@echo "🔍 Validating ctt-engine image (tag: $(CTT_IMAGE_TAG))..."
-	@nc_check=$$(docker run --rm ctt-engine:$(CTT_IMAGE_TAG) which nc 2>/dev/null) || true
-	@flecs_check=$$(docker run --rm ctt-engine:$(CTT_IMAGE_TAG) ldd /app/CTT_Engine 2>/dev/null | grep flecs) || true
-	@if [ -z "$$nc_check" ]; then \
-
-		echo "❌ nc MISSING from ctt-engine:$(CTT_IMAGE_TAG)"; \
-
-		echo "   Tagging ctt-engine:latest -> ctt-engine:$(CTT_IMAGE_TAG)"; \
-
-		docker tag ctt-engine:latest ctt-engine:$(CTT_IMAGE_TAG); \
-
-		nc_check=$$(docker run --rm ctt-engine:$(CTT_IMAGE_TAG) which nc 2>/dev/null) || true; \
-
-		if [ -z "$$nc_check" ]; then \
-
-			echo "   Still missing. Run: make bake-build-force"; \
-
-			exit 1; \
-
-		fi; \
-
-	fi
-	@if [ -z "$$flecs_check" ]; then echo "❌ libflecs.so MISSING"; exit 1; fi
-	@echo "✅ Engine validated: nc=$$nc_check, flecs=$$flecs_check"
+	@sh -c 'nc_check=$$(docker run --rm ctt-engine:$(CTT_IMAGE_TAG) which nc 2>/dev/null); flecs_check=$$(docker run --rm ctt-engine:$(CTT_IMAGE_TAG) ldd /app/CTT_Engine 2>/dev/null | grep flecs); if [ -z "$$nc_check" ]; then echo "❌ nc MISSING"; docker tag ctt-engine:latest ctt-engine:$(CTT_IMAGE_TAG) 2>/dev/null; nc_check=$$(docker run --rm ctt-engine:$(CTT_IMAGE_TAG) which nc 2>/dev/null); if [ -z "$$nc_check" ]; then echo "Still missing. Run: make bake-build-force"; exit 1; fi; fi; if [ -z "$$flecs_check" ]; then echo "❌ libflecs.so MISSING"; exit 1; fi; echo "✅ Engine validated: nc=$$nc_check, flecs=$$flecs_check"'
 # Phase 12 FIX: Prune only removes unused cache; does not touch bake cache dirs
 bake-prune: ## Prune Docker builder cache (frees disk without destroying images)
 	@echo "🧹 Pruning Docker builder cache..."

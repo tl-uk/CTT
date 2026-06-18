@@ -13,6 +13,7 @@ NPROCS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 # =============================================================================
 GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 CTT_IMAGE_TAG ?= $(GIT_SHA)
+export CTT_IMAGE_TAG
 BAKE_FILE := docker-bake.hcl
 CACHE_DIR := /tmp/ctt-docker-cache
 
@@ -138,6 +139,7 @@ bake-build-force: ## Force rebuild all services (no cache — use after header c
 	@echo "🔨 Force-building CTT services (no cache)..."
 	@rm -rf $(CACHE_DIR)/*
 	@docker buildx bake -f $(BAKE_FILE) --load --set "*.no-cache=true" --set "*.cache-from=" --allow=fs=/private/tmp --set "*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)" all-with-kg
+	@docker tag ctt-engine:latest ctt-engine:$(CTT_IMAGE_TAG) 2>/dev/null || true
 	@echo "✅ Force build complete (tag: $(CTT_IMAGE_TAG))"
 bake-build-%: ## Build specific service via bake (e.g., make bake-build-engine)
 	@echo "🔨 Building service: $* (tag: $(CTT_IMAGE_TAG))"
@@ -148,13 +150,30 @@ bake-build-%: ## Build specific service via bake (e.g., make bake-build-engine)
 
 # Phase 12 NEW: Validate engine image has required runtime dependencies
 validate-engine-image: ## Verify ctt-engine image has nc and libflecs.so
-	@echo "🔍 Validating ctt-engine image..."
+	@echo "🔍 Validating ctt-engine image (tag: $(CTT_IMAGE_TAG))..."
 	@nc_check=$$(docker run --rm ctt-engine:$(CTT_IMAGE_TAG) which nc 2>/dev/null) || true
 	@flecs_check=$$(docker run --rm ctt-engine:$(CTT_IMAGE_TAG) ldd /app/CTT_Engine 2>/dev/null | grep flecs) || true
-	@if [ -z "$$nc_check" ]; then echo "❌ nc MISSING"; echo "   Run: make bake-build-force"; exit 1; fi
-	@if [ -z "$$flecs_check" ]; then echo "❌ libflecs.so MISSING"; echo "   Run: make bake-build-force"; exit 1; fi
-	@echo "✅ Engine validated: nc=$$nc_check, flecs=$$flecs_check"
+	@if [ -z "$$nc_check" ]; then \
 
+		echo "❌ nc MISSING from ctt-engine:$(CTT_IMAGE_TAG)"; \
+
+		echo "   Tagging ctt-engine:latest -> ctt-engine:$(CTT_IMAGE_TAG)"; \
+
+		docker tag ctt-engine:latest ctt-engine:$(CTT_IMAGE_TAG); \
+
+		nc_check=$$(docker run --rm ctt-engine:$(CTT_IMAGE_TAG) which nc 2>/dev/null) || true; \
+
+		if [ -z "$$nc_check" ]; then \
+
+			echo "   Still missing. Run: make bake-build-force"; \
+
+			exit 1; \
+
+		fi; \
+
+	fi
+	@if [ -z "$$flecs_check" ]; then echo "❌ libflecs.so MISSING"; exit 1; fi
+	@echo "✅ Engine validated: nc=$$nc_check, flecs=$$flecs_check"
 # Phase 12 FIX: Prune only removes unused cache; does not touch bake cache dirs
 bake-prune: ## Prune Docker builder cache (frees disk without destroying images)
 	@echo "🧹 Pruning Docker builder cache..."

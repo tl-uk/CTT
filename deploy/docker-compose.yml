@@ -6,6 +6,7 @@
 
 services:
   engine:
+    image: ctt-engine:${CTT_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: services/l1-engine/Dockerfile
@@ -27,6 +28,7 @@ services:
     restart: unless-stopped
 
   harvester:
+    image: ctt-harvester:${CTT_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: services/data-pipeline/ingestor/Dockerfile
@@ -46,6 +48,7 @@ services:
     restart: unless-stopped
 
   interpreter:
+    image: ctt-interpreter:${CTT_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: services/data-pipeline/interpreter/Dockerfile
@@ -64,6 +67,7 @@ services:
     restart: unless-stopped
 
   fusion:
+    image: ctt-fusion:${CTT_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: services/data-pipeline/fusion/Dockerfile
@@ -84,6 +88,7 @@ services:
     restart: unless-stopped
 
   dashboard:
+    image: ctt-dashboard:${CTT_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: services/l2-bridge/Dockerfile
@@ -113,6 +118,7 @@ services:
   # Binds TACTICAL_PUB on 5564; consumes L1 telemetry; emits tactical policies.
   # ---------------------------------------------------------------------------
   orchestrator:
+    image: ctt-orchestrator:${CTT_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: services/l2-orchestrator/Dockerfile
@@ -201,6 +207,7 @@ services:
           memory: 512M
 
   audit-logger:
+    image: ctt-audit-logger:${CTT_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: services/l5-macro/Dockerfile
@@ -232,6 +239,7 @@ services:
           memory: 128M
 
   federation-bridge:
+    image: ctt-federation-bridge:${CTT_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: services/l5-macro/Dockerfile
@@ -269,6 +277,7 @@ services:
   # Phase 12 — L7 Knowledge Graph Service
   # ---------------------------------------------------------------------------
   l7-kg:
+    image: ctt-kg:${CTT_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: services/l7-kg/Dockerfile

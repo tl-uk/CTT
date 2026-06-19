@@ -185,13 +185,15 @@ compose-up-kg: ## Build all services (force, no cache), then launch stack
 	@echo "✅ Stack + KG started. Dashboard: http://localhost:5001"
 
 # Phase 12b FIX: compose-down now auto-prunes to prevent disk bloat
-compose-down: ## Stop and remove CTT stack + prune builder cache
+compose-down: ## Stop and remove CTT stack + prune old images + cache
 	@echo "🛑 Stopping CTT stack..."
 	@docker-compose -f $(COMPOSE_FILE) down
+	@echo "🧹 Pruning old CTT images..."
+	@docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^ctt-' | xargs -r docker rmi 2>/dev/null || true
 	@echo "🧹 Pruning builder cache..."
-	@docker builder prune -f --filter unused-for=24h
+	@docker builder prune -f
 	@rm -rf $(CACHE_DIR)/*
-	@echo "✅ Stack stopped + cache pruned"
+	@echo "✅ Stack stopped + images pruned + cache cleared"
 
 compose-build: ## Build all services via docker-compose (fallback, no bake)
 	@echo "🔨 Building CTT stack via docker-compose..."

@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY services/l7-kg/requirements.txt /app/services/l7-kg/
 RUN pip install --no-cache-dir -r /app/services/l7-kg/requirements.txt
 
+
+RUN pip install python-dotenv kafka-python pyzmq flask
+
 # Copy source code
 COPY services/l7-kg/*.py /app/services/l7-kg/
 COPY services/config/ports.py /app/services/config/

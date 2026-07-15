@@ -147,7 +147,7 @@ services:
   state-aggregator:
     image: ctt-orchestrator:${CTT_IMAGE_TAG:-latest}
     container_name: ctt-state-aggregator
-    command: python services/l2-orchestrator/state_aggregator.py
+    command: python state_aggregator.py
     environment:
       - CTT_ZMQ_TELEMETRY=tcp://engine:5555
       - CTT_KAFKA=kafka:29092
@@ -172,7 +172,7 @@ services:
   action-dispatcher:
     image: ctt-orchestrator:${CTT_IMAGE_TAG:-latest}
     container_name: ctt-action-dispatcher
-    command: python services/l2-orchestrator/action_dispatcher.py
+    command: python action_dispatcher.py
     environment:
       - CTT_ZMQ_PERTURB=tcp://engine:5556
       - CTT_KAFKA=kafka:29092
@@ -235,7 +235,7 @@ services:
       context: ..
       dockerfile: services/l5-macro/Dockerfile
     container_name: ctt-federation-bridge
-    command: python services/l5-macro/federation_bridge.py
+    command: python federation_bridge.py
     ports:
       - "5563:5563"
     environment:

@@ -93,7 +93,7 @@ def ensure_topics(bootstrap_servers: str, client_id: str = "ctt-bootstrap"):
 # Data Structures
 # =============================================================================
 
-@dataclass(order=True)
+@dataclass
 class PrioritizedAction:
     priority: int
     timestamp_ms: int

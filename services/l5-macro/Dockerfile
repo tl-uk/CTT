@@ -18,6 +18,8 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY services/l5-macro/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+RUN pip install kafka-python pyzmq
+
 # ---------------------------------------------------------------------------
 # Runtime stage
 # ---------------------------------------------------------------------------

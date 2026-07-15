@@ -59,15 +59,14 @@ try:
     from kafka.admin import KafkaAdminClient, NewTopic
     from kafka.errors import TopicAlreadyExistsError
     HAS_KAFKA = True
+    CTT_TOPICS = [
+        NewTopic(name="ctt.abdt.observation", num_partitions=3, replication_factor=1),
+        NewTopic(name="ctt.abdt.action", num_partitions=3, replication_factor=1),
+        NewTopic(name="ctt.abdt.policy", num_partitions=1, replication_factor=1),
+        NewTopic(name="ctt.audit.policy", num_partitions=1, replication_factor=1),
+    ]
 except ImportError:
     HAS_KAFKA = False
-
-CTT_TOPICS = [
-    NewTopic(name="ctt.abdt.observation", num_partitions=3, replication_factor=1),
-    NewTopic(name="ctt.abdt.action", num_partitions=3, replication_factor=1),
-    NewTopic(name="ctt.abdt.policy", num_partitions=1, replication_factor=1),
-    NewTopic(name="ctt.audit.policy", num_partitions=1, replication_factor=1),
-]
 
 def ensure_topics(bootstrap_servers: str, client_id: str = "ctt-bootstrap"):
     if not HAS_KAFKA:

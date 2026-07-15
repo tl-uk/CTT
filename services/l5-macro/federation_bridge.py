@@ -2,7 +2,7 @@
 """
 services/l5-macro/federation_bridge.py
 
-Phase 12d — FIXED Docker networking and Kafka integration.
+Phase 12e — FIXED syntax error + internal Kafka topic bootstrap.
 Uses get_resilient_socket to prevent "Address already in use" on rapid restarts.
 """
 import json
@@ -17,29 +17,27 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "config"))
 import zmq
 from ports import ZMQ_PORTS, get_resilient_socket
 from settings import config
-import copy
 
 # =============================================================================
-# Phase 12d FIX: Docker-aware ZMQ addresses
+# Phase 12e FIX: Docker-aware ZMQ addresses
 # =============================================================================
 
 CITY_ID = config.CTT_CITY_ID
 
-# Docker Compose service names resolve via internal DNS
-# Fallback to localhost for native mode
 ZMQ_POLICY_PUB = ZMQ_PORTS.get("POLICY_PUB", "tcp://*:5563")
 
-# Phase 12d FIX: Use engine service name in Docker, localhost in native mode
 if os.environ.get("CTT_DOCKER_MODE", "0") == "1":
     ZMQ_TELEMETRY_SUB = "tcp://ctt-engine:5555"
-    KAFKA_BOOTSTRAP = "ctt-kafka:9092"
+    KAFKA_BOOTSTRAP = "kafka:29092"
 else:
     ZMQ_TELEMETRY_SUB = ZMQ_PORTS.get("L1_TELEMETRY_SUB", "tcp://localhost:5555")
     KAFKA_BOOTSTRAP = "localhost:9092"
 
-# Phase 12d: Kafka integration for audit logging
+# Phase 12e: Kafka integration + admin client for topic bootstrap
 try:
     from kafka import KafkaProducer
+    from kafka.admin import KafkaAdminClient, NewTopic
+    from kafka.errors import TopicAlreadyExistsError
     HAS_KAFKA = True
 except ImportError:
     HAS_KAFKA = False
@@ -62,20 +60,48 @@ DOMAIN_CAPABILITIES = {
     "domain-pod": {"observes": ["maritime", "freight", "terminal"], "emits": ["terminal_belief"]},
 }
 
+CTT_TOPICS = [
+    NewTopic(name="ctt.abdt.observation", num_partitions=3, replication_factor=1),
+    NewTopic(name="ctt.abdt.action", num_partitions=3, replication_factor=1),
+    NewTopic(name="ctt.abdt.policy", num_partitions=1, replication_factor=1),
+    NewTopic(name="ctt.audit.policy", num_partitions=1, replication_factor=1),
+]
+
+def ensure_topics(bootstrap_servers: str, client_id: str = "ctt-bootstrap"):
+    """Idempotent topic creation. Safe to call from every service on startup."""
+    if not HAS_KAFKA:
+        return
+    admin = None
+    try:
+        admin = KafkaAdminClient(
+            bootstrap_servers=bootstrap_servers,
+            client_id=client_id,
+            retries=5,
+            retry_backoff_ms=1000
+        )
+        admin.create_topics(CTT_TOPICS)
+        print(f"[FederationBridge] ✅ Created topics: {[t.name for t in CTT_TOPICS]}")
+    except TopicAlreadyExistsError:
+        print(f"[FederationBridge] ℹ️ Topics already exist, skipping creation")
+    except Exception as e:
+        print(f"[FederationBridge] ⚠️ Topic bootstrap warning (non-fatal): {e}")
+    finally:
+        if admin:
+            admin.close()
+
 class FederationBridge:
     def __init__(self):
         self.ctx = zmq.Context()
-        # Phase 6.5: Use resilient sockets (LINGER=0 prevents TIME_WAIT on restart)
         self.policy_pub = get_resilient_socket(self.ctx, zmq.PUB, is_sub=False)
         self.policy_pub.bind(ZMQ_POLICY_PUB)
         self.tele_sub = get_resilient_socket(self.ctx, zmq.SUB, is_sub=True)
         self._connect_with_retry(self.tele_sub, ZMQ_TELEMETRY_SUB)
         self.tele_sub.setsockopt_string(zmq.SUBSCRIBE, "")
 
-        # Phase 12d: Kafka producer for audit logging
         self.kafka_producer = None
         if HAS_KAFKA:
             try:
+                ensure_topics(KAFKA_BOOTSTRAP, client_id="federation-bridge-bootstrap")
                 self.kafka_producer = KafkaProducer(
                     bootstrap_servers=KAFKA_BOOTSTRAP,
                     value_serializer=lambda v: json.dumps(v).encode('utf-8'),
@@ -90,7 +116,6 @@ class FederationBridge:
         self.window = defaultdict(list)
 
     def _connect_with_retry(self, socket, address, max_retries=30, delay=2.0):
-        """Phase 12d: Wait-for-it pattern for Docker Compose startup order."""
         for attempt in range(max_retries):
             try:
                 socket.connect(address)
@@ -116,12 +141,9 @@ class FederationBridge:
             try:
                 msg = self.tele_sub.recv_string()
                 data = json.loads(msg)
-                # Phase 7: Detect belief envelope vs raw telemetry
                 if isinstance(data, dict) and self._validate_belief(data):
-                    # External domain belief — merge for conflict resolution
                     self._merge_belief(data)
                 elif isinstance(data, list):
-                    # Raw local telemetry
                     for agent in data:
                         city = agent.get("city_id", CITY_ID)
                         pressure = agent.get("adversarial_pressure", 0)
@@ -136,7 +158,6 @@ class FederationBridge:
                 last_eval = time.time()
 
     def _wrap_belief(self, payload: dict, corridor_id: str = "national") -> dict:
-        """Wrap a domain-specific payload in the cross-domain belief envelope."""
         return {
             "meta": {
                 "schema_version": BELIEF_SCHEMA_VERSION,
@@ -150,12 +171,11 @@ class FederationBridge:
             "provenance": {
                 "upstream_domains": [],
                 "confidence": 1.0,
-                "model_version": "ctt-phase12d",
+                "model_version": "ctt-phase12e",
             }
         }
 
     def _validate_belief(self, msg: dict) -> bool:
-        """Validate incoming belief envelope without schema lock-in."""
         if not isinstance(msg, dict):
             return False
         for field in BELIEF_REQUIRED_FIELDS:
@@ -165,7 +185,6 @@ class FederationBridge:
         for field in BELIEF_META_FIELDS:
             if field not in meta:
                 return False
-        # Reject stale beliefs (> 5 min TTL)
         try:
             ts = datetime.fromisoformat(meta["timestamp"].replace("Z", "+00:00"))
             if (datetime.now(timezone.utc) - ts).total_seconds() > 300:
@@ -175,11 +194,9 @@ class FederationBridge:
         return True
 
     def _merge_belief(self, belief: dict):
-        """Merge an external belief into the local window for conflict resolution."""
         domain = belief["meta"]["domain_id"]
         corridor = belief["meta"]["corridor_id"]
         payload = belief["payload"]
-        # Store in window keyed by domain+corridor for later conflict resolution
         key = f"{domain}:{corridor}"
         self.window[key] = {
             "belief": belief,
@@ -215,15 +232,11 @@ class FederationBridge:
                 }
             }
             try:
-                # Phase 7: Wrap policy in belief envelope for cross-domain federation
                 belief = self._wrap_belief(policy, corridor_id="national")
                 self.policy_pub.send_string(json.dumps(belief))
                 print(f"[FederationBridge] EMITTED belief envelope: pressure_cap=75.0")
-
-                # Phase 12d: Audit log to Kafka
                 if self.kafka_producer:
                     self.kafka_producer.send('ctt.audit.policy', belief)
-
             except Exception as e:
                 print(f"[FederationBridge] ZMQ publish failed: {e}")
 
@@ -237,12 +250,10 @@ if __name__ == "__main__":
     try:
         bridge.run()
     except KeyboardInterrupt:
-        print("
-🛑 Federation bridge stopping...")
+        print("\n🛑 Federation bridge stopping...")
         bridge.stop()
     except Exception as e:
         import traceback
-        print(f"
-💥 Fatal: {e}")
+        print(f"\n💥 Fatal: {e}")
         traceback.print_exc()
         bridge.stop()

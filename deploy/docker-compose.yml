@@ -1,7 +1,7 @@
 # =============================================================================
-# CTT Phase 6.5 — Production Stack + Standalone L2 Orchestrator
+# CTT Phase 12e — Production Stack + ABDT Connectors
 # Location: deploy/docker-compose.yml
-# Usage: docker-compose -f deploy/docker-compose.yml up --build
+# Usage: CTT_IMAGE_TAG=$(git rev-parse --short HEAD) docker-compose -f deploy/docker-compose.yml up -d
 # =============================================================================
 
 services:
@@ -114,8 +114,7 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Phase 6.5 — L2 Orchestrator (separate container, clean failure isolation)
-  # Binds TACTICAL_PUB on 5564; consumes L1 telemetry; emits tactical policies.
+  # Phase 12e — L2 Orchestrator + ABDT Connectors (merged, fixed)
   # ---------------------------------------------------------------------------
   orchestrator:
     image: ctt-orchestrator:${CTT_IMAGE_TAG:-latest}
@@ -144,6 +143,192 @@ services:
         limits:
           memory: 128M
 
+  # Phase 12e: State Aggregator (temporal firewall)
+  state-aggregator:
+    image: ctt-orchestrator:${CTT_IMAGE_TAG:-latest}
+    container_name: ctt-state-aggregator
+    command: python services/l2-orchestrator/state_aggregator.py
+    environment:
+      - CTT_ZMQ_TELEMETRY=tcp://engine:5555
+      - CTT_KAFKA=kafka:29092
+      - PYTHONPATH=/app/services/config:/app/services/l2-orchestrator
+    volumes:
+      - ../services/l2-orchestrator/state_aggregator.py:/app/services/l2-orchestrator/state_aggregator.py:ro
+      - ../services/config:/app/services/config:ro
+    depends_on:
+      engine:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - ctt
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # Phase 12e: Action Dispatcher
+  action-dispatcher:
+    image: ctt-orchestrator:${CTT_IMAGE_TAG:-latest}
+    container_name: ctt-action-dispatcher
+    command: python services/l2-orchestrator/action_dispatcher.py
+    environment:
+      - CTT_ZMQ_PERTURB=tcp://engine:5556
+      - CTT_KAFKA=kafka:29092
+      - PYTHONPATH=/app/services/config:/app/services/l2-orchestrator
+    volumes:
+      - ../services/l2-orchestrator/action_dispatcher.py:/app/services/l2-orchestrator/action_dispatcher.py:ro
+      - ../services/config:/app/services/config:ro
+    depends_on:
+      engine:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    networks:
+      - ctt
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # Phase 12e — L5 Macro Services
+  # ---------------------------------------------------------------------------
+  audit-logger:
+    image: ctt-l5-macro:${CTT_IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: services/l5-macro/Dockerfile
+    container_name: ctt-audit-logger
+    command: python audit_logger.py
+    environment:
+      - CTT_L1_ENGINE_HOST=engine
+      - CTT_FUSION_HOST=fusion
+      - CTT_CITY_ID=city-01
+      - CTT_REGION=uk-southeast
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TELEMETRY_TOPIC=ctt.telemetry.raw
+      - KAFKA_PERTURBATION_TOPIC=ctt.perturbation.applied
+      - KAFKA_CONSUMER_GROUP=ctt-l5-macro
+      - PYTHONPATH=/app/services/config:/app/services/l5-macro
+    networks:
+      - ctt
+    depends_on:
+      kafka:
+        condition: service_started
+      engine:
+        condition: service_healthy
+      fusion:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # Phase 12e: Federation Bridge (merged — single source of truth)
+  federation-bridge:
+    image: ctt-l5-macro:${CTT_IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: services/l5-macro/Dockerfile
+    container_name: ctt-federation-bridge
+    command: python services/l5-macro/federation_bridge.py
+    ports:
+      - "5563:5563"
+    environment:
+      - CTT_L1_ENGINE_HOST=engine
+      - CTT_FUSION_HOST=fusion
+      - CTT_CITY_ID=city-01
+      - CTT_REGION=uk-southeast
+      - CTT_DOMAIN_ID=domain-dft
+      - CTT_DOCKER_MODE=1
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TELEMETRY_TOPIC=ctt.telemetry.raw
+      - KAFKA_POLICY_TOPIC=ctt.policy.structural
+      - KAFKA_CONSUMER_GROUP=ctt-l5-macro
+      - PYTHONPATH=/app/services/config:/app/services/l5-macro
+    volumes:
+      - ../services/l5-macro/federation_bridge.py:/app/services/l5-macro/federation_bridge.py:ro
+      - ../services/config:/app/services/config:ro
+    networks:
+      - ctt
+    depends_on:
+      kafka:
+        condition: service_started
+      engine:
+        condition: service_healthy
+      fusion:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # Phase 12 — L7 Knowledge Graph Service + ABDT Cache
+  # ---------------------------------------------------------------------------
+  l7-kg:
+    image: ctt-kg:${CTT_IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: services/l7-kg/Dockerfile
+    container_name: ctt-l7-kg
+    ports:
+      - "5565:5565"
+      - "5566:5566"
+    environment:
+      - CTT_KG_PUB=tcp://*:5565
+      - CTT_KG_SUB=tcp://localhost:5566
+      - CTT_L1_ENGINE_HOST=engine
+      - PYTHONPATH=/app/services/config:/app/services/l7-kg
+    networks:
+      - ctt
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import zmq; print('ok')\" || exit 1"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    depends_on:
+      engine:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # Phase 12e: ABDT Agent Cache
+  abdt-cache:
+    image: ctt-kg:${CTT_IMAGE_TAG:-latest}
+    container_name: ctt-abdt-cache
+    command: python services/l7-kg/abdt_agent_cache.py
+    environment:
+      - CTT_KAFKA=kafka:29092
+      - PYTHONPATH=/app/services/config:/app/services/l7-kg
+    volumes:
+      - ../services/l7-kg/abdt_agent_cache.py:/app/services/l7-kg/abdt_agent_cache.py:ro
+      - ../services/config:/app/services/config:ro
+    depends_on:
+      kafka:
+        condition: service_started
+      l7-kg:
+        condition: service_healthy
+    networks:
+      - ctt
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure
+  # ---------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:latest
     container_name: ctt-grafana
@@ -165,9 +350,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Phase 6 — Kafka Core (Zookeeper mode — stable on Colima)
-  # ---------------------------------------------------------------------------
   zookeeper:
     image: confluentinc/cp-zookeeper:latest
     container_name: ctt-zookeeper
@@ -205,107 +387,6 @@ services:
       resources:
         limits:
           memory: 512M
-
-  audit-logger:
-    image: ctt-audit-logger:${CTT_IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: services/l5-macro/Dockerfile
-    container_name: ctt-audit-logger
-    command: python audit_logger.py
-    environment:
-      - CTT_L1_ENGINE_HOST=engine
-      - CTT_FUSION_HOST=fusion
-      - CTT_CITY_ID=city-01
-      - CTT_REGION=uk-southeast
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - KAFKA_TELEMETRY_TOPIC=ctt.telemetry.raw
-      - KAFKA_PERTURBATION_TOPIC=ctt.perturbation.applied
-      - KAFKA_CONSUMER_GROUP=ctt-l5-macro
-      - PYTHONPATH=/app/services/config:/app/services/l5-macro
-    networks:
-      - ctt
-    depends_on:
-      kafka:
-        condition: service_started
-      engine:
-        condition: service_healthy
-      fusion:
-        condition: service_healthy
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-
-  federation-bridge:
-    image: ctt-federation-bridge:${CTT_IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: services/l5-macro/Dockerfile
-    container_name: ctt-federation-bridge
-    command: python federation_bridge.py
-    ports:
-      - "5563:5563"
-    environment:
-      - CTT_L1_ENGINE_HOST=engine
-      - CTT_FUSION_HOST=fusion
-      - CTT_CITY_ID=city-01
-      - CTT_REGION=uk-southeast
-      - CTT_DOMAIN_ID=domain-dft
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - KAFKA_TELEMETRY_TOPIC=ctt.telemetry.raw
-      - KAFKA_POLICY_TOPIC=ctt.policy.structural
-      - KAFKA_CONSUMER_GROUP=ctt-l5-macro
-      - PYTHONPATH=/app/services/config:/app/services/l5-macro
-    networks:
-      - ctt
-    depends_on:
-      kafka:
-        condition: service_started
-      engine:
-        condition: service_healthy
-      fusion:
-        condition: service_healthy
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-
-  # ---------------------------------------------------------------------------
-  # Phase 12 — L7 Knowledge Graph Service
-  # ---------------------------------------------------------------------------
-  l7-kg:
-    image: ctt-kg:${CTT_IMAGE_TAG:-latest}
-    build:
-      context: ..
-      dockerfile: services/l7-kg/Dockerfile
-    container_name: ctt-l7-kg
-    ports:
-      - "5565:5565"
-      - "5566:5566"
-    environment:
-      - CTT_KG_PUB=tcp://*:5565
-      - CTT_KG_SUB=tcp://localhost:5566
-      - CTT_L1_ENGINE_HOST=engine
-      - PYTHONPATH=/app/services/config:/app/services/l7-kg
-    networks:
-      - ctt
-    healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import zmq; print('ok')\" || exit 1"]
-      interval: 10s
-      timeout: 3s
-      start_period: 10s
-      retries: 3  
-    depends_on:
-      engine:
-        condition: service_healthy
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 256M
 
 networks:
   ctt:

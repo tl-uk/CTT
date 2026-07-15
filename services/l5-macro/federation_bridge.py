@@ -2,7 +2,7 @@
 """
 services/l5-macro/federation_bridge.py
 
-Phase 6.5 — L5 Macro & Federation Bridge (ZMQ resilience hardened).
+Phase 12d — FIXED Docker networking and Kafka integration.
 Uses get_resilient_socket to prevent "Address already in use" on rapid restarts.
 """
 import json
@@ -20,17 +20,39 @@ from settings import config
 import copy
 
 # =============================================================================
+# Phase 12d FIX: Docker-aware ZMQ addresses
+# =============================================================================
+
+CITY_ID = config.CTT_CITY_ID
+
+# Docker Compose service names resolve via internal DNS
+# Fallback to localhost for native mode
+ZMQ_POLICY_PUB = ZMQ_PORTS.get("POLICY_PUB", "tcp://*:5563")
+
+# Phase 12d FIX: Use engine service name in Docker, localhost in native mode
+if os.environ.get("CTT_DOCKER_MODE", "0") == "1":
+    ZMQ_TELEMETRY_SUB = "tcp://ctt-engine:5555"
+    KAFKA_BOOTSTRAP = "ctt-kafka:9092"
+else:
+    ZMQ_TELEMETRY_SUB = ZMQ_PORTS.get("L1_TELEMETRY_SUB", "tcp://localhost:5555")
+    KAFKA_BOOTSTRAP = "localhost:9092"
+
+# Phase 12d: Kafka integration for audit logging
+try:
+    from kafka import KafkaProducer
+    HAS_KAFKA = True
+except ImportError:
+    HAS_KAFKA = False
+    print("[FederationBridge] ⚠️  kafka-python not installed — audit logging disabled")
+
+# =============================================================================
 # Phase 7 — Cross-Domain Belief Envelope
-# Minimal shared JSON schema so NHS/BEIS/Met Office can federate without
-# schema lock-in. Each domain publishes beliefs scoped to shared spatial
-# corridors; CTT resolves conflicts at the L5 layer.
 # =============================================================================
 
 BELIEF_SCHEMA_VERSION = "ctt-belief-1.0"
 BELIEF_REQUIRED_FIELDS = ["meta", "payload"]
 BELIEF_META_FIELDS = ["schema_version", "domain_id", "corridor_id", "timestamp", "source_host"]
 
-# Domain capability registry (who can observe what)
 DOMAIN_CAPABILITIES = {
     "domain-dft": {"observes": ["transport", "policy"], "emits": ["structural_policy"]},
     "domain-dhl": {"observes": ["logistics", "freight"], "emits": ["telemetry"]},
@@ -40,10 +62,6 @@ DOMAIN_CAPABILITIES = {
     "domain-pod": {"observes": ["maritime", "freight", "terminal"], "emits": ["terminal_belief"]},
 }
 
-CITY_ID = config.CTT_CITY_ID
-ZMQ_POLICY_PUB = ZMQ_PORTS.get("POLICY_PUB", "tcp://*:5563")
-ZMQ_TELEMETRY_SUB = ZMQ_PORTS.get("L1_TELEMETRY_SUB", "tcp://localhost:5555")
-
 class FederationBridge:
     def __init__(self):
         self.ctx = zmq.Context()
@@ -51,15 +69,43 @@ class FederationBridge:
         self.policy_pub = get_resilient_socket(self.ctx, zmq.PUB, is_sub=False)
         self.policy_pub.bind(ZMQ_POLICY_PUB)
         self.tele_sub = get_resilient_socket(self.ctx, zmq.SUB, is_sub=True)
-        self.tele_sub.connect(ZMQ_TELEMETRY_SUB)
+        self._connect_with_retry(self.tele_sub, ZMQ_TELEMETRY_SUB)
         self.tele_sub.setsockopt_string(zmq.SUBSCRIBE, "")
+
+        # Phase 12d: Kafka producer for audit logging
+        self.kafka_producer = None
+        if HAS_KAFKA:
+            try:
+                self.kafka_producer = KafkaProducer(
+                    bootstrap_servers=KAFKA_BOOTSTRAP,
+                    value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+                    retries=3,
+                    retry_backoff_ms=1000
+                )
+                print(f"[FederationBridge] Kafka producer connected to {KAFKA_BOOTSTRAP}")
+            except Exception as e:
+                print(f"[FederationBridge] ⚠️  Kafka connection failed: {e}")
+
         self._running = False
         self.window = defaultdict(list)
+
+    def _connect_with_retry(self, socket, address, max_retries=30, delay=2.0):
+        """Phase 12d: Wait-for-it pattern for Docker Compose startup order."""
+        for attempt in range(max_retries):
+            try:
+                socket.connect(address)
+                print(f"[FederationBridge] Connected to {address}")
+                return
+            except zmq.error.ZMQError as e:
+                print(f"[FederationBridge] ⏳ Retry {attempt+1}/{max_retries}: {e}")
+                time.sleep(delay)
+        raise RuntimeError(f"Failed to connect to {address} after {max_retries} attempts")
 
     def run(self):
         print(f"[FederationBridge] Online | city={CITY_ID} | ZMQ mode")
         print(f"[FederationBridge] ZMQ policy pub: {ZMQ_POLICY_PUB}")
         print(f"[FederationBridge] ZMQ telemetry sub: {ZMQ_TELEMETRY_SUB}")
+        print(f"[FederationBridge] Kafka: {KAFKA_BOOTSTRAP if self.kafka_producer else 'DISABLED'}")
         print("[FederationBridge] L5 → L2 feedback loop active")
         time.sleep(1.5)
 
@@ -104,7 +150,7 @@ class FederationBridge:
             "provenance": {
                 "upstream_domains": [],
                 "confidence": 1.0,
-                "model_version": "ctt-phase7",
+                "model_version": "ctt-phase12d",
             }
         }
 
@@ -173,11 +219,18 @@ class FederationBridge:
                 belief = self._wrap_belief(policy, corridor_id="national")
                 self.policy_pub.send_string(json.dumps(belief))
                 print(f"[FederationBridge] EMITTED belief envelope: pressure_cap=75.0")
+
+                # Phase 12d: Audit log to Kafka
+                if self.kafka_producer:
+                    self.kafka_producer.send('ctt.audit.policy', belief)
+
             except Exception as e:
                 print(f"[FederationBridge] ZMQ publish failed: {e}")
 
     def stop(self):
         self._running = False
+        if self.kafka_producer:
+            self.kafka_producer.close()
 
 if __name__ == "__main__":
     bridge = FederationBridge()

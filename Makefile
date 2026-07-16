@@ -580,7 +580,7 @@ colima-nuke: ## Full Lima store reset (fixes _disks bloat)
 	@rm -rf ~/.colima/_lima/_disks
 	@rm -rf ~/.colima/_lima/colima
 	@echo "🚀 Starting fresh Colima..."
-	@colima start --cpu 4 --memory 8 --disk 30
+	@colima start --cpu 4 --memory 8 --disk 15
 	@echo "✅ Nuclear reset complete. Rebuild with: docker-compose up --build -d"
 
 # =============================================================================

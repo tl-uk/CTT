@@ -135,7 +135,15 @@ bake-build: ## Build all services via docker-bake.hcl (reads cache, does NOT exp
 bake-build-force: ## Force rebuild all services (no cache, no export — cleanest)
 	@echo "🔨 Force-building CTT services (no cache, no export)..."
 	@rm -rf $(CACHE_DIR)/*
-	@docker buildx bake -f $(BAKE_FILE) --load 		--set "*.no-cache=true" 		--set "*.cache-from=" 		--set "*.cache-to=" 		--allow=fs=/private/tmp 		--set "*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)" 		all-with-kg
+	@echo "🧹 Pruning old CTT images (keep current tag: $(CTT_IMAGE_TAG))..."
+	@docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^ctt-' | grep -v ":$(CTT_IMAGE_TAG)$$" | xargs -r docker rmi 2>/dev/null || true
+	@docker buildx bake -f $(BAKE_FILE) --load \
+		--set "*.no-cache=true" \
+		--set "*.cache-from=" \
+		--set "*.cache-to=" \
+		--allow=fs=/private/tmp \
+		--set "*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)" \
+		all-with-kg
 	@echo "✅ Force build complete (tag: $(CTT_IMAGE_TAG))"
 
 bake-build-%: ## Build specific service via bake (e.g., make bake-build-engine)
@@ -179,7 +187,14 @@ compose-up-bake: ## Start full stack using pre-built bake images (no rebuild)
 compose-up-kg: ## Build all services (force, no cache), then launch stack
 	@echo "🔨 Building all CTT services (force, no cache)..."
 	@rm -rf $(CACHE_DIR)/*
-	@docker buildx bake -f $(BAKE_FILE) --load 		--set "*.no-cache=true" 		--set "*.cache-from=" 		--set "*.cache-to=" 		--allow=fs=/private/tmp 		--set "*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)" 		all-with-kg
+	@docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^ctt-' | grep -v ":$(CTT_IMAGE_TAG)$$" | xargs -r docker rmi 2>/dev/null || true
+	@docker buildx bake -f $(BAKE_FILE) --load \
+		--set "*.no-cache=true" \
+		--set "*.cache-from=" \
+		--set "*.cache-to=" \
+		--allow=fs=/private/tmp \
+		--set "*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)" \
+		all-with-kg
 	@echo "🚀 Starting CTT stack + L7 Knowledge Graph (tag: $(CTT_IMAGE_TAG))..."
 	@CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) docker-compose -f $(COMPOSE_FILE) up -d --no-build
 	@echo "✅ Stack + KG started. Dashboard: http://localhost:5001"

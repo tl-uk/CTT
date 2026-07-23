@@ -1,9 +1,9 @@
 # CTT Layer 4 Spatial Dependencies
 # Phase 14a: SUMO Spatial + OSM Network Generation
+# Note: libsumo is installed via pip (has arm64 wheels) not apt libsumo-dev
 
-# SUMO Python bindings (libsumo)
-# Note: libsumo is installed via system package (sumo-tools) in Dockerfile
-# This file is for additional Python dependencies
+# SUMO Python bindings (C++ API via pip wheel)
+libsumo>=1.22.0
 
 # Messaging
 pyzmq>=25.0
@@ -15,6 +15,3 @@ shapely>=2.0
 
 # OSM network extraction (optional — for osm_importer.py)
 osmnx>=1.6
-
-# Phase 14b: Flecs entity sync
-# (no additional deps — uses pyzmq already listed)

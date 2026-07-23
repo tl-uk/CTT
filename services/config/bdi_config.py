@@ -169,38 +169,49 @@ def get_bdi_profile(name: str = None) -> BDIProfile:
 # Individual Env Var Overrides (highest priority)
 # =============================================================================
 
+def _env_float(key: str, default: float) -> float:
+    """Read float from env, handling empty strings."""
+    val = os.environ.get(key, "")
+    return float(val) if val.strip() else default
+
+def _env_int(key: str, default: int) -> int:
+    """Read int from env, handling empty strings."""
+    val = os.environ.get(key, "")
+    return int(val) if val.strip() else default
+
 def get_effective_thresholds() -> Dict[str, Any]:
     """
     Build effective thresholds from profile + env overrides.
     Env vars take highest priority, then profile, then defaults.
+    Empty string env vars fall back to profile defaults.
     """
     profile = get_bdi_profile()
     tco = get_tco_profile()
 
     return {
         # BDI thresholds
-        "SCHMITT_THRESHOLD_ON": float(os.environ.get("CTT_SCHMITT_ON", profile.schmitt_threshold_on)),
-        "SCHMITT_THRESHOLD_OFF": float(os.environ.get("CTT_SCHMITT_OFF", profile.schmitt_threshold_off)),
-        "SCHMITT_HYSTERESIS": float(os.environ.get("CTT_SCHMITT_HYST", profile.schmitt_hysteresis)),
-        "HABIT_DECAY_LAMBDA": float(os.environ.get("CTT_HABIT_LAMBDA", profile.habit_decay_lambda)),
-        "INFRASTRUCTURE_MIN": float(os.environ.get("CTT_INFRA_MIN", profile.infrastructure_min)),
-        "SOCIAL_INFLUENCE_MIN": float(os.environ.get("CTT_SOCIAL_MIN", profile.social_influence_min)),
-        "INTENTION_TTL_MS": int(os.environ.get("CTT_INTENTION_TTL", profile.intention_ttl_ms)),
-        "COALITION_COOLDOWN_MS": int(os.environ.get("CTT_COALITION_COOLDOWN", profile.coalition_cooldown_ms)),
+        "SCHMITT_THRESHOLD_ON": _env_float("CTT_SCHMITT_ON", profile.schmitt_threshold_on),
+        "SCHMITT_THRESHOLD_OFF": _env_float("CTT_SCHMITT_OFF", profile.schmitt_threshold_off),
+        "SCHMITT_HYSTERESIS": _env_float("CTT_SCHMITT_HYST", profile.schmitt_hysteresis),
+        "HABIT_DECAY_LAMBDA": _env_float("CTT_HABIT_LAMBDA", profile.habit_decay_lambda),
+        "INFRASTRUCTURE_MIN": _env_float("CTT_INFRA_MIN", profile.infrastructure_min),
+        "SOCIAL_INFLUENCE_MIN": _env_float("CTT_SOCIAL_MIN", profile.social_influence_min),
+        "INTENTION_TTL_MS": _env_int("CTT_INTENTION_TTL", profile.intention_ttl_ms),
+        "COALITION_COOLDOWN_MS": _env_int("CTT_COALITION_COOLDOWN", profile.coalition_cooldown_ms),
 
         # TCO parameters
-        "TCO_CAPEX_ICE": float(os.environ.get("CTT_TCO_CAPEX_ICE", tco.capex_ice)),
-        "TCO_CAPEX_EV": float(os.environ.get("CTT_TCO_CAPEX_EV", tco.capex_ev)),
-        "TCO_OPEX_ICE": float(os.environ.get("CTT_TCO_OPEX_ICE", tco.opex_ice_annual)),
-        "TCO_OPEX_EV": float(os.environ.get("CTT_TCO_OPEX_EV", tco.opex_ev_annual)),
-        "TCO_CARBON_TAX": float(os.environ.get("CTT_TCO_CARBON_TAX", tco.carbon_tax_gbp_tonne)),
-        "TCO_DIESEL_PPL": float(os.environ.get("CTT_TCO_DIESEL_PPL", tco.diesel_price_ppl)),
-        "TCO_ELECTRICITY_PPKWH": float(os.environ.get("CTT_TCO_ELEC_PPKWH", tco.electricity_price_ppkwh)),
-        "TCO_HORIZON_YEARS": int(os.environ.get("CTT_TCO_HORIZON", tco.tco_horizon_years)),
+        "TCO_CAPEX_ICE": _env_float("CTT_TCO_CAPEX_ICE", tco.capex_ice),
+        "TCO_CAPEX_EV": _env_float("CTT_TCO_CAPEX_EV", tco.capex_ev),
+        "TCO_OPEX_ICE": _env_float("CTT_TCO_OPEX_ICE", tco.opex_ice_annual),
+        "TCO_OPEX_EV": _env_float("CTT_TCO_OPEX_EV", tco.opex_ev_annual),
+        "TCO_CARBON_TAX": _env_float("CTT_TCO_CARBON_TAX", tco.carbon_tax_gbp_tonne),
+        "TCO_DIESEL_PPL": _env_float("CTT_TCO_DIESEL_PPL", tco.diesel_price_ppl),
+        "TCO_ELECTRICITY_PPKWH": _env_float("CTT_TCO_ELEC_PPKWH", tco.electricity_price_ppkwh),
+        "TCO_HORIZON_YEARS": _env_int("CTT_TCO_HORIZON", tco.tco_horizon_years),
 
         # Metadata
-        "POLICY_MODE": os.environ.get("CTT_BDI_POLICY_MODE", "balanced"),
-        "TCO_PROFILE": os.environ.get("CTT_TCO_PROFILE", "base"),
+        "POLICY_MODE": os.environ.get("CTT_BDI_POLICY_MODE", "balanced") or "balanced",
+        "TCO_PROFILE": os.environ.get("CTT_TCO_PROFILE", "base") or "base",
     }
 
 

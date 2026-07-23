@@ -1,7 +1,20 @@
 # CTT Layer 4 Spatial Dependencies
-libsumo>=1.22.0
+# Phase 14a: SUMO Spatial + OSM Network Generation
+
+# SUMO Python bindings (libsumo)
+# Note: libsumo is installed via system package (sumo-tools) in Dockerfile
+# This file is for additional Python dependencies
+
+# Messaging
 pyzmq>=25.0
 kafka-python>=2.0
+
+# Math & geometry
 numpy>=1.24
 shapely>=2.0
+
+# OSM network extraction (optional — for osm_importer.py)
 osmnx>=1.6
+
+# Phase 14b: Flecs entity sync
+# (no additional deps — uses pyzmq already listed)

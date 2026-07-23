@@ -1,41 +1,28 @@
-# =============================================================================
-# CTT Phase 14a: Layer 4 Spatial — SUMO/libsumo Bridge
-# MMOG Analogy: Zone Server (physics engine for one corridor)
-# =============================================================================
+# services/l4-spatial/Dockerfile
+# CTT Phase 14a: SUMO Spatial Service — MMOG Zone Server
+# Uses libsumo (C++ API) for zero socket overhead vs TraCI
 
-FROM ubuntu:22.04 AS sumo-builder
+FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV SUMO_VERSION=1.22.0
 
-# Install SUMO + libsumo dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    sumo sumo-tools libsumo-dev \
-    libxerces-c3.2 libproj22 libgdal30 \
-    python3 python3-pip python3-dev \
-    gcc g++ libzmq3-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Install SUMO + dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends     sumo sumo-tools libsumo-dev     python3 python3-pip     netcat-openbsd     && rm -rf /var/lib/apt/lists/*
 
-# Ensure SUMO tools are available
+# Set SUMO_HOME
 ENV SUMO_HOME=/usr/share/sumo
-ENV PYTHONPATH="/usr/share/sumo/tools:${PYTHONPATH}"
+ENV PYTHONPATH=/usr/share/sumo/tools:/app/services/config:/app/services/l4-spatial
 
-# ---------------------------------------------------------------------------
-# Python dependencies
-# ---------------------------------------------------------------------------
 WORKDIR /app
+
+# Copy requirements first for layer caching
 COPY services/l4-spatial/requirements.txt /app/services/l4-spatial/
-RUN pip install --no-cache-dir -r /app/services/l4-spatial/requirements.txt
+RUN pip3 install --no-cache-dir -r /app/services/l4-spatial/requirements.txt
 
-# ---------------------------------------------------------------------------
-# Copy source
-# ---------------------------------------------------------------------------
-COPY services/config/ /app/services/config/
+# Copy source code
 COPY services/l4-spatial/*.py /app/services/l4-spatial/
-COPY deploy/osm-networks/ /app/deploy/osm-networks/
+COPY services/config/ports.py /app/services/config/
+COPY services/config/settings.py /app/services/config/
 
-ENV PYTHONPATH=/app/services/config:/app/services/l4-spatial:/usr/share/sumo/tools
-WORKDIR /app/services/l4-spatial
-
-# Default: run bridge for corridor (overridden by docker-compose per instance)
-CMD ["python", "-u", "sumo_bridge.py"]
+# Default: run the SUMO bridge for the configured corridor
+CMD ["python3", "-u", "services/l4-spatial/sumo_bridge.py"]

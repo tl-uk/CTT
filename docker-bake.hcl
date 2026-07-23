@@ -156,3 +156,68 @@ group "all-with-kg" {
 group "phase12-test" {
   targets = ["engine", "kg-service"]
 }
+
+// =============================================================================
+// Phase 14a: SUMO Spatial Service
+// =============================================================================
+
+target "sumo" {
+  inherits = ["_common"]
+  context = "."
+  dockerfile = "services/l4-spatial/Dockerfile"
+  tags = ["ctt-sumo:${CTT_IMAGE_TAG}"]
+  cache-from = ["type=local,src=${CACHE_DIR}/sumo"]
+}
+
+// =============================================================================
+// Updated Build Groups (Phase 14)
+// =============================================================================
+
+group "default" {
+  targets = [
+    "engine", "harvester", "interpreter", "fusion",
+    "dashboard", "orchestrator",
+    "l5-macro"
+  ]
+}
+
+group "pipeline" {
+  targets = ["harvester", "interpreter", "fusion"]
+}
+
+group "l2" {
+  targets = ["dashboard", "orchestrator"]
+}
+
+group "l5" {
+  targets = ["l5-macro"]
+}
+
+group "spatial" {
+  targets = ["sumo"]
+}
+
+group "all-with-kg" {
+  targets = [
+    "engine", "harvester", "interpreter", "fusion",
+    "dashboard", "orchestrator",
+    "l5-macro",
+    "kg-service",
+    "sumo"
+  ]
+}
+
+group "all-with-spatial" {
+  targets = [
+    "engine", "harvester", "interpreter", "fusion",
+    "dashboard", "orchestrator",
+    "l5-macro",
+    "kg-service",
+    "sumo"
+  ]
+}
+
+// Phase 14: Minimal test group (engine + sumo)
+group "phase14-test" {
+  targets = ["engine", "sumo"]
+}

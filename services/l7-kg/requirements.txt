@@ -1,4 +1,18 @@
 # L7 Knowledge Graph — Python dependencies
+# Phase 13b: Updated for BDI + Coalition + Kafka integration
+
+# Core data science
 numpy>=1.24.0
 scikit-learn>=1.3.0
+
+# Messaging & networking
 pyzmq>=25.0.0
+kafka-python>=2.0.0
+
+# Environment & web
+python-dotenv>=1.0.0
+flask>=2.3.0
+
+# Phase 13b: Optional — for LLM bridge (when enabled)
+# openai>=1.0.0
+# transformers>=4.30.0

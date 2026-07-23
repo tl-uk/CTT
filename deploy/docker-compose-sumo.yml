@@ -2,29 +2,36 @@
 # CTT Phase 13-14: SUMO Spatial + BDI Cognitive Stack
 # Overlay: deploy/docker-compose-sumo.yml
 # Usage: docker-compose -f deploy/docker-compose.yml -f deploy/docker-compose-sumo.yml up -d
+#
+# All corridor configuration is externalized via environment variables.
+# No hardcoded bounding boxes, paths, or fleet parameters.
 # =============================================================================
 
 services:
   # ---------------------------------------------------------------------------
   # Phase 14a: SUMO Zone Server (one per corridor)
-  # MMOG Analogy: Physics server for zone "m20_corridor"
+  # MMOG Analogy: Physics server for a configurable zone
   # Scale: One container per corridor; can run on edge nodes
+  #
+  # Configure via env:
+  #   CTT_CORRIDOR_ID=m20_corridor
+  #   CTT_SUMO_CONFIG=/app/deploy/osm-networks/m20_corridor/m20_corridor.sumocfg
   # ---------------------------------------------------------------------------
   sumo-m20:
     image: ctt-sumo:${CTT_IMAGE_TAG:-latest}
     build:
       context: ..
       dockerfile: services/l4-spatial/Dockerfile
-    container_name: ctt-sumo-m20
+    container_name: ctt-sumo-${CTT_CORRIDOR_ID:-m20}
     environment:
-      - CTT_CORRIDOR_ID=m20_corridor
-      - CTT_SUMO_CONFIG=/app/deploy/osm-networks/m20_corridor/m20_corridor.sumocfg
+      - CTT_CORRIDOR_ID=${CTT_CORRIDOR_ID:-m20_corridor}
+      - CTT_SUMO_CONFIG=${CTT_SUMO_CONFIG:-/app/deploy/osm-networks/m20_corridor/m20_corridor.sumocfg}
       - CTT_ZMQ_TELEMETRY=tcp://ctt-engine:5555
       - CTT_ZMQ_SUMO_PUB=tcp://*:5557
       - CTT_KAFKA=kafka:29092
       - PYTHONPATH=/app/services/config:/app/services/l4-spatial:/usr/share/sumo/tools
     ports:
-      - "5557:5557"
+      - "${CTT_SUMO_PUB_PORT:-5557}:5557"
     volumes:
       - ../services/l4-spatial/:/app/services/l4-spatial/:ro
       - ../services/config/:/app/services/config/:ro
@@ -40,31 +47,46 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: ${CTT_SUMO_MEMORY:-512M}
 
-  # Additional corridor instances (commented out — enable as needed)
-  # sumo-a20:
-  #   extends: sumo-m20
-  #   container_name: ctt-sumo-a20
+  # Phase 14b: Flecs ↔ SUMO Entity Sync (optional sidecar)
+  # Uncomment to enable bidirectional entity synchronization
+  # flecs-sumo-sync:
+  #   image: ctt-sumo:${CTT_IMAGE_TAG:-latest}
+  #   container_name: ctt-flecs-sumo-sync
+  #   command: python3 services/l4-spatial/flecs_sumo_bridge.py
   #   environment:
-  #     - CTT_CORRIDOR_ID=a20_charging
-  #   ports:
-  #     - "5558:5557"
+  #     - CTT_CORRIDOR_ID=${CTT_CORRIDOR_ID:-m20_corridor}
+  #     - CTT_ZMQ_SUMO_PUB=tcp://sumo-m20:5557
+  #     - PYTHONPATH=/app/services/config:/app/services/l4-spatial
+  #   networks:
+  #     - ctt
+  #   depends_on:
+  #     - sumo-m20
+  #   restart: unless-stopped
 
   # ---------------------------------------------------------------------------
   # Phase 13a: BDI Engine (integrated into ABDT Cache)
   # Replaces standalone abdt-cache with BDI-enabled version
+  # All thresholds and TCO parameters externalized to bdi_config.py
   # ---------------------------------------------------------------------------
   abdt-cache:
     image: ctt-kg:${CTT_IMAGE_TAG:-latest}
     container_name: ctt-abdt-cache
-    command: python services/l7-kg/abdt_agent_cache_v2.py
+    command: python services/l7-kg/abdt_agent_cache.py
     environment:
       - CTT_KAFKA=kafka:29092
-      - CTT_ENABLE_BDI=1
+      - CTT_ENABLE_BDI=${CTT_ENABLE_BDI:-1}
+      - CTT_BDI_POLICY_MODE=${CTT_BDI_POLICY_MODE:-balanced}
+      - CTT_BDI_CYCLE_MS=${CTT_BDI_CYCLE_MS:-1000}
+      - CTT_TCO_PROFILE=${CTT_TCO_PROFILE:-base}
+      - CTT_TCO_HORIZON_YEARS=${CTT_TCO_HORIZON_YEARS:-5}
+      - CTT_SCHMITT_ON=${CTT_SCHMITT_ON:-}
+      - CTT_SCHMITT_OFF=${CTT_SCHMITT_OFF:-}
+      - CTT_SCHMITT_HYST=${CTT_SCHMITT_HYST:-}
       - PYTHONPATH=/app/services/config:/app/services/l7-kg
     volumes:
-      - ../services/l7-kg/abdt_agent_cache_v2.py:/app/services/l7-kg/abdt_agent_cache_v2.py:ro
+      - ../services/l7-kg/abdt_agent_cache.py:/app/services/l7-kg/abdt_agent_cache.py:ro
       - ../services/l7-kg/bdi_engine.py:/app/services/l7-kg/bdi_engine.py:ro
       - ../services/l7-kg/coalition_engine.py:/app/services/l7-kg/coalition_engine.py:ro
       - ../services/config:/app/services/config:ro
@@ -79,7 +101,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: ${CTT_BDI_MEMORY:-256M}
 
   # ---------------------------------------------------------------------------
   # Phase 13b: LLM Bridge (scaffold — requires GPU node in production)

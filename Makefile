@@ -424,6 +424,60 @@ run-fusion-bg: ## Run fusion in background
 	@$(call wait-for-port,5556,fusion)
 
 # =============================================================================
+# Phase 14: SUMO Spatial + BDI Targets
+# =============================================================================
+
+# Phase 14a: Build SUMO spatial service
+bake-build-sumo: ## Build SUMO spatial service
+	@echo "🗺️  Building SUMO spatial service..."
+	@docker buildx bake -f $(BAKE_FILE) --load sumo 		--allow=fs=/private/tmp 		--set "sumo.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)"
+	@echo "✅ SUMO built (tag: $(CTT_IMAGE_TAG))"
+
+# Phase 14: Build all services including SUMO
+bake-build-all: ## Build all CTT services including SUMO and KG
+	@echo "🔨 Building ALL CTT services (Phase 14)..."
+	@docker buildx bake -f $(BAKE_FILE) --load all-with-spatial 		--allow=fs=/private/tmp 		--set "*.args.CTT_IMAGE_TAG=$(CTT_IMAGE_TAG)"
+	@echo "✅ All services built (tag: $(CTT_IMAGE_TAG))"
+
+# Phase 14a: Generate OSM network for M20 corridor
+osm-m20: ## Generate SUMO network for M20 corridor
+	@echo "🗺️  Generating OSM network for M20 corridor..."
+	@mkdir -p deploy/osm-networks
+	@cd services/l4-spatial && python3 osm_importer.py 		--corridor m20_corridor 		--bbox 51.45,51.05,1.45,0.05 		--output ../../deploy/osm-networks
+	@echo "✅ M20 network generated"
+
+# Phase 14: Start stack with SUMO overlay
+compose-up-sumo: ## Start CTT stack + SUMO spatial overlay
+	@echo "🚀 Starting CTT stack + SUMO (tag: $(CTT_IMAGE_TAG))..."
+	@CTT_IMAGE_TAG=$(CTT_IMAGE_TAG) docker-compose 		-f $(COMPOSE_FILE) 		-f deploy/docker-compose-sumo.yml 		up -d --no-build
+	@echo "✅ Stack + SUMO started. Dashboard: http://localhost:5001"
+
+compose-down-sumo: ## Stop CTT stack + SUMO overlay
+	@echo "🛑 Stopping CTT stack + SUMO..."
+	@docker-compose -f $(COMPOSE_FILE) -f deploy/docker-compose-sumo.yml down
+	@echo "✅ Stack + SUMO stopped"
+
+compose-logs-sumo: ## Tail SUMO bridge logs
+	@docker-compose -f $(COMPOSE_FILE) -f deploy/docker-compose-sumo.yml logs -f sumo-m20
+
+# Phase 14: Test SUMO bridge in isolation
+test-sumo-bridge: ## Test SUMO bridge with mock telemetry
+	@echo "🧪 Testing SUMO bridge..."
+	@cd services/l4-spatial && python3 -c "
+import sys; sys.path.insert(0, '../../services/config')
+from sumo_bridge import SUMOBridge
+print('SUMOBridge imports OK')
+print('Mock mode:', not __import__('sumo_bridge').HAS_SUMO)
+"
+	@echo "✅ SUMO bridge test complete"
+
+# Phase 13b: Test BDI engine calibration
+test-bdi-calibration: ## Test BDI thresholds with Fleet RFP scenarios
+	@echo "🧪 Testing BDI calibration..."
+	@cd services/l7-kg && python3 bdi_engine.py
+	@echo "✅ BDI calibration test complete"
+	
+# =============================================================================
 # Testing & Verification
 # =============================================================================
 

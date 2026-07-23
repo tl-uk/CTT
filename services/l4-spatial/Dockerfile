@@ -1,13 +1,20 @@
 # services/l4-spatial/Dockerfile
 # CTT Phase 14a: SUMO Spatial Service — MMOG Zone Server
-# Uses libsumo (C++ API) for zero socket overhead vs TraCI
+# Uses pip libsumo (has arm64 wheels) instead of apt libsumo-dev
 
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install SUMO + dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends     sumo sumo-tools libsumo-dev     python3 python3-pip     netcat-openbsd     && rm -rf /var/lib/apt/lists/*
+# Install SUMO tools + python (libsumo via pip, not apt)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    sumo sumo-tools \
+    python3 python3-pip \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install libsumo via pip (includes arm64 C++ bindings)
+RUN pip3 install --no-cache-dir libsumo pyzmq kafka-python numpy shapely
 
 # Set SUMO_HOME
 ENV SUMO_HOME=/usr/share/sumo

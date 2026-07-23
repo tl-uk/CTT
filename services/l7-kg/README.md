@@ -51,7 +51,7 @@ calibrated thresholds from Fleet RFP TCO analysis.
 | `kg_bridge.py` | ZMQ bridge between C++ engine and Python KG | 9 |
 | `bdi_engine.py` | BDI core: Belief→Desire→Intention→Action | 13a |
 | `coalition_engine.py` | Coalition formation (guild system) | 13c |
-| `abdt_agent_cache_v2.py` | Agent cache + BDI cycle at 1Hz | 13a |
+| `abdt_agent_cache.py` | Agent cache + BDI cycle at 1Hz | 13a |
 | `ssn_schema.ttl` | RDF/OWL ontology for SSN records | 9 |
 | `ssn_experience_component.h` | C++ Flecs component (compressed vector) | 9 |
 

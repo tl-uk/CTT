@@ -26,5 +26,5 @@ ENV PYTHONPATH=/app/services/config:/app/services/l7-kg
 
 # Phase 13b: Default command runs KG bridge
 # Override via docker-compose for abdt-cache-v2:
-#   command: python services/l7-kg/abdt_agent_cache_v2.py
+#   command: python services/l7-kg/abdt_agent_cache.py
 CMD ["python", "-u", "services/l7-kg/kg_bridge.py"]
